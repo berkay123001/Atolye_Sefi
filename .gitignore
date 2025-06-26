@@ -1,0 +1,38 @@
+# Sanal Ortam Klasörü
+.venv/
+.conda/
+
+# Gizli Bilgiler Dosyası
+.env
+
+# Python Cache Dosyaları
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE / Editor-specific files
+.vscode/
+.idea/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Gradio cache
+.gradio_cache/
+gradio_cached_examples/
+
+# Weights & Biases
+wandb/
+
+# SQLite Database
+*.db
+*.sqlite
+*.sqlite3
