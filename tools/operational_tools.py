@@ -1,55 +1,124 @@
 # tools/operational_tools.py
-import uuid
+
+import sys
+import os
+import requests
 import time
-from typing import Dict
+import json
+from typing import Dict, List, Optional
 
 # LangChain'in bu fonksiyonu bir "araç" olarak tanımasını sağlayan dekoratör
 from langchain.tools import tool
 
-@tool
-def prepare_environment(gpu_type: str) -> Dict:
-    """
-    Belirtilen GPU tipine sahip bir bulut ortamı (örn: RunPod) hazırlar.
-    Bu araç, bir MLOps görevi için gerekli olan sanal makineyi ve
-    temel yapılandırmayı kurar. Şimdilik bu bir simülasyondur.
+# Proje yapılandırmasını import et
+try:
+    from config import settings
+except ImportError:
+    print("Hata: config.py bulunamadı.")
+    sys.exit(1)
 
-    Args:
-        gpu_type (str): Kurulması istenen GPU'nun modeli (örn: 'A100', 'RTX 4090').
 
-    Returns:
-        Dict: İşlemin durumunu ve oluşturulan oturumun kimliğini içeren bir sözlük.
-    """
-    # 1. Görevin başladığını belirten bir mesaj yazdır.
-    #    Bu, terminalde kodu çalıştırırken bize bilgi verir.
-    print(f"\n[Operational Tool] RunPod üzerinde '{gpu_type}' GPU'lu bir ortam hazırlanıyor...")
-    
-    # 2. Gerçek bir API çağrısının zaman alacağını simüle etmek için kısa bir bekleme.
-    time.sleep(3)
-    
-    # 3. Rastgele ve benzersiz bir oturum kimliği (session_id) oluştur.
-    #    Bu, ileride bu özel ortamı takip etmemizi sağlar.
-    session_id = f"session_{uuid.uuid4().hex[:8]}"
-    
-    print(f"[Operational Tool] Ortam başarıyla kuruldu! Oturum Kimliği: {session_id}")
-
-    # 4. İşlem başarılı olduğunda, standart bir başarı mesajı ve oturum kimliğini döndür.
-    #    Ajan, bu çıktıyı "Gözlem" olarak alacak ve planının sonraki adımına geçecektir.
-    return {
-        "status": "success",
-        "message": f"Ortam, {gpu_type} GPU ile başarıyla kuruldu.",
-        "session_id": session_id
+# --- GraphQL Sorgu Fonksiyonu ---
+def _run_graphql_query(query: str) -> Dict:
+    """RunPod GraphQL API'sine bir sorgu gönderir ve sonucu döndürür."""
+    api_url = "https://api.runpod.io/graphql"
+    headers = {
+        "Authorization": f"Bearer {settings.RUNPOD_API_KEY}",
+        "Content-Type": "application/json"
     }
+    try:
+        response = requests.post(api_url, headers=headers, json={'query': query})
+        if response.status_code != 200:
+             error_details = response.json() if response.headers.get('Content-Type') == 'application/json' else response.text
+             return {"errors": [{"message": f"API'den {response.status_code} hatası alındı.", "details": error_details}]}
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"[GraphQL Hata] İstek gönderilemedi: {e}")
+        return {"errors": [{"message": str(e)}]}
 
-# --- Test Bloğu ---
-# Bu dosya doğrudan çalıştırıldığında, aracın doğru çalışıp çalışmadığını test eder.
+
+@tool
+def get_available_gpus() -> List[Dict]:
+    """
+    RunPod API'sinden o an mevcut olan ve kiralanabilecek tüm GPU tiplerini listeler.
+    """
+    # ... (Bu fonksiyon değişmedi)
+    graphql_query = "query GpuTypes { gpuTypes { id displayName memoryInGb } }"
+    data = _run_graphql_query(graphql_query)
+    if "errors" in data and data.get("errors"): return [{"error": "Mevcut GPU listesi alınamadı.", "details": data['errors'][0]['message']}]
+    return data.get("data", {}).get("gpuTypes", [])
+
+
+@tool
+def prepare_environment(gpu_type_id: str, docker_image: str = "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04") -> Dict:
+    """
+    RunPod API'sini kullanarak, web arayüzünü taklit eden spesifik disk boyutları
+    ile Community Cloud üzerinde bir ortam başlatmayı dener.
+    """
+    print(f"\n[Operational Tool] '{gpu_type_id}' için 'Community Cloud' üzerinde SPESİFİK disk isteği ile ortam hazırlanıyor...")
+    
+    unique_pod_name = f"AtolyeSefi-Pod-{gpu_type_id.replace(' ', '-').lower()}-{int(time.time())}"
+
+    # NİHAİ ÇÖZÜM: Web arayüzünün gönderdiği disk parametrelerini manuel olarak ekliyoruz.
+    graphql_mutation = f'''
+    mutation podFindAndDeployOnDemand {{
+      podFindAndDeployOnDemand(
+        input: {{
+          cloudType: COMMUNITY,
+          gpuTypeId: "{gpu_type_id}",
+          name: "{unique_pod_name}",
+          imageName: "{docker_image}",
+          gpuCount: 1,
+          volumeInGb: 35,          # <-- DOĞRU PARAMETRE: Ana depolama alanı (Volume)
+          containerDiskInGb: 5     # <-- DOĞRU PARAMETRE: Sistem diski (Container)
+        }}
+      ) {{
+        id
+        imageName
+        machineId
+      }}
+    }}
+    '''
+    data = _run_graphql_query(graphql_mutation)
+    
+    if "errors" in data and data.get("errors"):
+        raw_error_details = data['errors']
+        print(f"\n[!!!] HAM API HATASI: {json.dumps(raw_error_details, indent=2)}\n")
+        return {"status": "error", "message": f"'{gpu_type_id}' için API'den hata alındı.", "raw_error": raw_error_details}
+    
+    pod_data = data.get("data", {}).get("podFindAndDeployOnDemand")
+    if pod_data:
+        print(f"[Operational Tool] Başarılı! '{gpu_type_id}' ile Pod oluşturuldu. ID: {pod_data.get('id')}")
+        return {"status": "success", "message": f"'{gpu_type_id}' ile Pod başarıyla oluşturuldu.", "pod_info": pod_data}
+    else:
+        return {"status": "error", "message": "Pod oluşturulamadı. Spesifik isteğe rağmen anlık yer olmayabilir veya başka bir sorun olabilir.", "raw_response": data}
+
+
+# --- Nihai Kanıt Testi ---
 if __name__ == '__main__':
-    print("--- Operasyonel Araç Testi Başlatıldı ---")
+    print("--- \"Community Cloud\" üzerinde Nihai Test (Spesifik Disk Boyutu ile) ---")
     
-    # Test senaryosu: 'A100' GPU'lu bir ortam iste.
-    gpu_to_prepare = "NVIDIA A100 80GB"
-    result = prepare_environment(gpu_to_prepare)
+    gpu_to_try = "NVIDIA RTX A4000"
+    image_to_try = "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04"
     
-    print("\n--- Test Sonucu ---")
-    # Dönen sözlüğü daha okunaklı bir formatta yazdır.
-    import json
-    print(json.dumps(result, indent=2))
+    print(f"\nUYARI: '{gpu_to_try}' için '{image_to_try}' imajı ile TEK bir deneme yapılacak.")
+    print("İptal etmek için 5 saniye içinde CTRL+C'ye basın.")
+    try:
+        time.sleep(5)
+    except KeyboardInterrupt:
+        print("\nİşlem kullanıcı tarafından iptal edildi.")
+        sys.exit(0)
+
+    result = prepare_environment.invoke({
+        "gpu_type_id": gpu_to_try,
+        "docker_image": image_to_try
+    })
+    
+    print("\n--- Nihai Test Sonucu ---")
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    print("-------------------------")
+    if result.get("status") == "success":
+        print("[SONUÇ] BAŞARILI! Sorun çözüldü. Kod, spesifik disk isteği ile Pod oluşturabildi.")
+    else:
+        print("[SONUÇ] DİKKAT! Kod hala Pod oluşturamadı.")
+        print("Eğer bu deneme de başarısız olursa, sorun KESİNLİKLE kodda değildir. Lütfen RunPod API anahtarınızın 'Serverless' izinlerine sahip olduğundan emin olun veya yeni bir anahtar oluşturmayı deneyin.")

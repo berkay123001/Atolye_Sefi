@@ -1,3 +1,5 @@
+# config.py
+
 import os
 from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
@@ -10,8 +12,12 @@ class Settings(BaseSettings):
     Proje ayarlarını .env dosyasından okuyan ve yöneten yapılandırma sınıfı.
     Pydantic kullanarak tip güvenliği (type safety) sağlar.
     """
-    # .env dosyasından okunacak zorunlu alan. Eğer .env içinde yoksa hata verir.
+    # .env dosyasından okunacak zorunlu alanlar.
+    # Eğer .env içinde yoksa uygulama hata verir.
     GROQ_API_KEY: str
+    
+    # YENİ EKLENDİ: RunPod API'sine erişim için gerekli anahtar.
+    RUNPOD_API_KEY: str
 
     # Varsayılan değeri olan, opsiyonel alanlar.
     AGENT_MODEL_NAME: str = "llama3-70b-8192"
@@ -25,9 +31,3 @@ class Settings(BaseSettings):
 # Ayarları projenin her yerinden kolayca erişilebilir hale getirmek için
 # bir örnek (instance) oluşturuyoruz.
 settings = Settings()
-
-# Test için ayarların doğru yüklendiğini kontrol edebiliriz:
-if __name__ == "__main__":
-    print("Yüklenen Ayarlar:")
-    print(f"Model Adı: {settings.AGENT_MODEL_NAME}")
-    print(f"Groq API Anahtarı: {settings.GROQ_API_KEY[:4]}... (güvenlik için kısaltıldı)")
