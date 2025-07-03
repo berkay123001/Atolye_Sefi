@@ -4,28 +4,22 @@ import sys
 import os
 import threading
 from queue import Queue
-from typing import List, Dict, Any
+from typing import List, Any
 
-# Proje ana dizinini Python yoluna ekleyerek diğer modülleri import edilebilir hale getiriyoruz.
-current_dir = os.path.dirname(os.path.abspath(__file__))
-parent_dir = os.path.dirname(current_dir)
-sys.path.append(parent_dir)
-
-# --- LangChain Kütüphaneleri ---
+# LangChain Kütüphaneleri
 from langchain_groq import ChatGroq
 from langchain.agents import AgentExecutor, create_react_agent
 from langchain.memory import ConversationBufferWindowMemory
 from langchain import hub
 
-# --- Proje Bileşenleri ---
+# Proje Bileşenleri
 try:
     from config import settings
-    # Ajanın kullanacağı tüm araçları import ediyoruz
+    # Ajanın kullanacağı son ve en akıllı araçları import ediyoruz
     from tools.architectural_tools import decide_architecture
-    # 1. YENİ DEĞİŞİKLİK: Yeni operasyonel aracı import ediyoruz.
-    from tools.operational_tools import prepare_environment 
+    from tools.operational_tools import find_and_prepare_gpu 
     from tools.callback_handlers import StreamingGradioCallbackHandler
-    print("Ajan için yapılandırma ve tüm araçlar/handler'lar başarıyla yüklendi.")
+    print("Ajan için yapılandırma ve Usta Araçlar başarıyla yüklendi.")
 except ImportError as e:
     print(f"Hata: Ajan, gerekli modülleri bulamadı: {e}")
     sys.exit(1)
@@ -34,14 +28,18 @@ except ImportError as e:
 class ChiefAgent:
     """
     "Atölye Şefi" projesinin ana ajan sınıfı.
-    Artık birden fazla yeteneğe sahip ve düşünce sürecini canlı olarak aktarabiliyor.
+    Artık akıllı, çok adımlı görevleri yerine getirebilen "Usta" araçlara sahip.
     """
     def __init__(self):
         """
         ChiefAgent sınıfının kurucu metodu.
         """
-        # 2. YENİ DEĞİŞİKLİK: Ajanın alet çantasını, her iki aracı da içerecek şekilde güncelliyoruz.
-        self.tools: List[Any] = [decide_architecture, prepare_environment]
+        # Ajanın alet çantası artık çok daha basit ve güçlü.
+        # Sadece yüksek seviyeli, akıllı araçları içeriyor.
+        self.tools: List[Any] = [
+            decide_architecture, 
+            find_and_prepare_gpu
+        ]
 
         self.llm = ChatGroq(
             temperature=0,
@@ -88,16 +86,14 @@ class ChiefAgent:
 
 
 # --- Test Bloğu ---
-# Bu dosya doğrudan `python agents/chief_agent.py` komutuyla çalıştırıldığında,
-# ajanın yeni araçları doğru kullanıp kullanmadığını test eder.
 if __name__ == '__main__':
-    print("ChiefAgent'in çoklu araç test modu başlatılıyor...")
+    print("ChiefAgent'in 'Usta Araç' ile test modu başlatılıyor...")
     chief_agent = ChiefAgent()
     
     log_queue = Queue()
 
-    # Test Senaryosu: Ajanın yeni 'prepare_environment' aracını kullanmasını tetikleme
-    test_input = "Bana bir Transformer modeli için A100 GPU'lu bir ortam hazırla."
+    # Test Senaryosu: Ajanın yeni "Usta" aracını kullanmasını izleme
+    test_input = "Bana en az 16GB VRAM'i olan bir ortam bul ve kur."
     
     chief_agent.run(user_input=test_input, q=log_queue)
 
@@ -111,10 +107,6 @@ if __name__ == '__main__':
             if isinstance(item, dict) and "final_answer" in item:
                 print("\n--- Nihai Cevap Alındı ---")
                 print(item["final_answer"])
-                break
-            elif isinstance(item, dict) and "error" in item:
-                print("\n--- Hata Alındı ---")
-                print(item["error"])
                 break
             else:
                 print(item, end="")
