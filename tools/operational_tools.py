@@ -5,12 +5,11 @@ import os
 import requests
 import time
 import json
-import re  # DÜZELTME: Metin ayrıştırma için 're' modülünü import ediyoruz.
+import re
 from typing import Dict, List, Any
 
-# LangChain araçları için Pydantic şemalarını import ediyoruz.
+# LangChain araçları için gerekli importlar
 from langchain.tools import tool
-from langchain_core.pydantic_v1 import BaseModel, Field
 
 try:
     from config import settings
@@ -18,13 +17,10 @@ except ImportError:
     print("Hata: config.py bulunamadı.")
     sys.exit(1)
 
+# --- Yardımcı Fonksiyonlar (Değişmedi) ---
 def _run_graphql_query(query: str) -> Dict:
-    """RunPod GraphQL API'sine bir sorgu gönderir ve sonucu döndürür."""
     api_url = "https://api.runpod.io/graphql"
-    headers = {
-        "Authorization": f"Bearer {settings.RUNPOD_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {settings.RUNPOD_API_KEY}", "Content-Type": "application/json"}
     try:
         response = requests.post(api_url, headers=headers, json={'query': query})
         if response.status_code != 200:
@@ -35,14 +31,12 @@ def _run_graphql_query(query: str) -> Dict:
         return {"errors": [{"message": str(e)}]}
 
 def _get_available_gpus_internal() -> List[Dict]:
-    """(İç Kullanım) RunPod API'sinden mevcut GPU'ları listeler."""
     graphql_query = "query GpuTypes { gpuTypes { id displayName memoryInGb } }"
     data = _run_graphql_query(graphql_query)
     if "errors" in data and data.get("errors"): return []
     return data.get("data", {}).get("gpuTypes", [])
 
 def _prepare_environment_internal(gpu_type_id: str) -> Dict:
-    """(İç Kullanım) Belirtilen TEK bir GPU ID'si ile ortam hazırlamayı dener."""
     unique_pod_name = f"AtolyeSefi-Pod-{gpu_type_id.replace(' ', '-').lower()}-{int(time.time())}"
     graphql_mutation = f'''
     mutation podFindAndDeployOnDemand {{
@@ -61,36 +55,46 @@ def _prepare_environment_internal(gpu_type_id: str) -> Dict:
     '''
     return _run_graphql_query(graphql_mutation)
 
-# DÜZELTME: Artık @tool dekoratöründe bir şema belirtmiyoruz,
-# çünkü girdiyi kendimiz, daha esnek bir şekilde işleyeceğiz.
+# --- "Usta" Araç ---
+
 @tool
 def find_and_prepare_gpu(min_memory_gb: Any = 16) -> Dict:
     """
     Belirtilen minimum VRAM'e sahip, o an mevcut olan bir GPU'yu bulur ve kiralar.
-    Bunu yapmak için, önce mevcut GPU'ları listeler, sonra da uygun olanları
-    tek tek kiralamayı dener.
-
-    Args:
-        min_memory_gb (Any): İstenen minimum VRAM miktarı (GB). 
-                             Ajanın gönderdiği 'min_memory_gb = 16' gibi string'leri de kabul eder.
+    Bu araç, hem ajandan gelen string girdileri hem de API'den gelen string VRAM
+    değerlerini tolere edecek kadar sağlamdır.
     """
-    # DÜZELTME: Ajanın gönderdiği 'min_memory_gb = 16' gibi string'leri
-    # ayrıştırıp, içinden sadece sayıyı alan bir mantık ekliyoruz.
-    parsed_min_memory_gb = 16  # Varsayılan değer
+    # 1. ADIM: AJANDAN GELEN KİRLİ VERİYİ TEMİZLE (SENİN ÇÖZÜMÜN)
+    # Bu blok, ajanın 'min_memory_gb = 16' gibi bir metin göndermesi durumunda bile
+    # içindeki sayıyı doğru bir şekilde ayrıştırır.
+    parsed_min_memory_gb = 16
     if isinstance(min_memory_gb, str):
         match = re.search(r'\d+', min_memory_gb)
         if match:
             parsed_min_memory_gb = int(match.group(0))
     elif isinstance(min_memory_gb, int):
         parsed_min_memory_gb = min_memory_gb
-    
-    print(f"\n[Master Tool] En uygun GPU'yu bulma ve hazırlama görevi başlatıldı (Min VRAM: {parsed_min_memory_gb}GB)...")
+
+    print(f"\n[Master Tool] Görev başlatıldı (İstenen Min VRAM: {parsed_min_memory_gb}GB)...")
     
     all_gpus = _get_available_gpus_internal()
     if not all_gpus:
         return {"status": "error", "message": "GPU listesi alınamadığı için işlem yapılamadı."}
 
-    suitable_gpus = [gpu for gpu in all_gpus if gpu.get('memoryInGb', 0) >= parsed_min_memory_gb]
+    # 2. ADIM: API'DEN GELEN KİRLİ VERİYİ TEMİZLE (YENİ EKlenen ZIRH)
+    # Bu yardımcı fonksiyon, API'den gelen 'memoryInGb' değerinin '80' gibi bir
+    # string olması durumunda bile onu güvenli bir şekilde sayıya çevirir.
+    def to_int_safe(value: Any) -> int:
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return 0
+
+    # Artık her iki taraftan gelen veriyi de temizleyerek karşılaştırma yapıyoruz.
+    suitable_gpus = [
+        gpu for gpu in all_gpus 
+        if to_int_safe(gpu.get('memoryInGb')) >= parsed_min_memory_gb
+    ]
     
     if not suitable_gpus:
         return {"status": "error", "message": "Belirtilen minimum VRAM'e uygun hiçbir GPU bulunamadı."}
@@ -125,7 +129,6 @@ def find_and_prepare_gpu(min_memory_gb: Any = 16) -> Dict:
 # --- Test Bloğu ---
 if __name__ == '__main__':
     print("--- Yeni 'Usta' Araç Testi Başlatıldı ---")
-    # Aracı, ajanın gönderdiği gibi dağınık bir string ile test edelim.
-    result = find_and_prepare_gpu.invoke("min_memory_gb = 16")
+    result = find_and_prepare_gpu.invoke({"min_memory_gb": 16})
     print("\n--- Nihai Test Sonucu ---")
     print(json.dumps(result, indent=2, ensure_ascii=False))

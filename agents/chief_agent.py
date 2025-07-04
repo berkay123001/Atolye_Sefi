@@ -15,11 +15,12 @@ from langchain import hub
 # Proje Bileşenleri
 try:
     from config import settings
-    # Ajanın kullanacağı son ve en akıllı araçları import ediyoruz
+    # DÜZELTME: Artık sadece "Usta" aracı ve mimari aracını import ediyoruz.
+    # Bu, olası döngüsel import hatalarını ve eksik isimleri önler.
     from tools.architectural_tools import decide_architecture
     from tools.operational_tools import find_and_prepare_gpu 
     from tools.callback_handlers import StreamingGradioCallbackHandler
-    print("Ajan için yapılandırma ve Usta Araçlar başarıyla yüklendi.")
+    print("Ajan için yapılandırma ve güncel araçlar başarıyla yüklendi.")
 except ImportError as e:
     print(f"Hata: Ajan, gerekli modülleri bulamadı: {e}")
     sys.exit(1)
@@ -34,8 +35,7 @@ class ChiefAgent:
         """
         ChiefAgent sınıfının kurucu metodu.
         """
-        # Ajanın alet çantası artık çok daha basit ve güçlü.
-        # Sadece yüksek seviyeli, akıllı araçları içeriyor.
+        # Alet çantası artık sadece yüksek seviyeli, akıllı araçları içeriyor.
         self.tools: List[Any] = [
             decide_architecture, 
             find_and_prepare_gpu
