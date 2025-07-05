@@ -25,7 +25,7 @@ def run_agent_interaction(user_message: str, history: list, logs: str):
     Kullanıcı etkileşimini yönetir. Bu yeni versiyon GraphAgent ile
     doğrudan ve senkron şekilde çalışır - karmaşık Queue/threading yok!
     """
-    # 1. Kullanıcının mesajını sohbete ekle
+    # 1. Kullanıcının mesajını sohbete ekle (eski format - [user, bot] listesi)
     history.append([user_message, None])
     
     # 2. Zaman damgası ile yeni görev başlangıcını logla
@@ -43,9 +43,9 @@ def run_agent_interaction(user_message: str, history: list, logs: str):
         print(f"GraphAgent'a gönderiliyor: {user_message}")
         final_state = graph_agent.run(user_message)
         
-        # 4. Ajanın nihai cevabını al
+        # 4. Ajanın nihai cevabını al ve eski formatta ekle
         agent_response = final_state.get('result', 'Ajan bir cevap üretemedi.')
-        history[-1][1] = agent_response
+        history[-1][1] = agent_response  # Son mesajın bot kısmını doldur
         
         # 5. Intermediate steps'i logla (GraphAgent'ın düşünce süreci)
         intermediate_steps = final_state.get('intermediate_steps', [])
@@ -65,7 +65,7 @@ def run_agent_interaction(user_message: str, history: list, logs: str):
     except Exception as e:
         # 6. Hata durumunda kullanıcıya bilgi ver
         error_msg = f"**HATA OLUŞTU:**\n\n{str(e)}"
-        history[-1][1] = error_msg
+        history[-1][1] = error_msg  # Son mesajın bot kısmını hata ile doldur
         current_logs += f"HATA: {str(e)}\n"
         current_logs += f"=== GÖREV HATA İLE SONLANDI [{datetime.now().strftime('%H:%M:%S')}] ===\n"
         
@@ -85,6 +85,8 @@ with gr.Blocks(title="Atölye Şefi", theme=gr.themes.Soft(primary_hue="sky", se
             chatbot = gr.Chatbot(
                 label="Diyalog Penceresi", 
                 height=600, 
+                # type="messages",  # Eski Gradio sürümü için geçici olarak kapatıldı
+                value=[],  # Boş liste ile başlat
                 avatar_images=(None, "https://placehold.co/100x100/2980b9/ffffff?text=Şef")
             )
             with gr.Row():
@@ -111,6 +113,10 @@ with gr.Blocks(title="Atölye Şefi", theme=gr.themes.Soft(primary_hue="sky", se
     # Artık generator değil, normal fonksiyon kullanıyoruz
     submit_button.click(fn=run_agent_interaction, inputs=inputs, outputs=outputs)
     user_input.submit(fn=run_agent_interaction, inputs=inputs, outputs=outputs)
+
+def health_check():
+    """Health check endpoint for Docker containers"""
+    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
 
 if __name__ == "__main__":
     print("Gradio uygulaması başlatılıyor...")

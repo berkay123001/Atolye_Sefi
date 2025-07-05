@@ -1,0 +1,50 @@
+# =============================================================================
+# Atölye Şefi - Production Docker Compose Override
+# =============================================================================
+# Bu dosya üretim ortamı için ek yapılandırmaları içerir.
+#
+# Kullanım:
+#   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# =============================================================================
+
+version: '3.8'
+
+services:
+  atolyesefi:
+    # Üretim modunda başlat
+    command: ["--mode", "production"]
+    
+    # Üretim çevre değişkenleri
+    environment:
+      - GRADIO_DEBUG=0
+      - PYTHONOPTIMIZE=1
+      - PYTHONDONTWRITEBYTECODE=1
+    
+    # Kaynak sınırları
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4.0'
+        reservations:
+          memory: 4G
+          cpus: '2.0'
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    
+    # Log yapılandırması
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # Health check - üretim için daha sık
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/health", "||", "exit", "1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s

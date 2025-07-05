@@ -8,6 +8,9 @@ import json
 import re
 from typing import Dict, List, Any
 
+# 🚨 ACİL GÜVENLİK AYARI - Simulation Mode
+SIMULATION_MODE = os.getenv("RUNPOD_SIMULATION_MODE", "true").lower() == "true"
+
 # LangChain araçları için gerekli importlar
 from langchain.tools import tool
 
@@ -65,6 +68,20 @@ def find_and_prepare_gpu(min_memory_gb: Any = 16) -> Dict:
     Bu araç, hem ajandan gelen string girdileri hem de API'den gelen string VRAM
     değerlerini tolere edecek kadar sağlamdır.
     """
+    # 🚨 GÜVENLİK KONTROLÜ - Simulation Mode
+    if SIMULATION_MODE:
+        print("🟡 [SIMULATION MODE] Pod oluşturma simüle ediliyor...")
+        return {
+            "status": "success",
+            "message": "'NVIDIA RTX A4000' ile Pod başarıyla oluşturuldu.",
+            "pod_info": {
+                "id": "7jdg5e7mt4xvfw", 
+                "imageName": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+                "machineId": "robtjgci7up0"
+            },
+            "simulation": True
+        }
+    
     # 1. ADIM: AJANDAN GELEN KİRLİ VERİYİ TEMİZLE (SENİN ÇÖZÜMÜN)
     # Bu blok, ajanın 'min_memory_gb = 16' gibi bir metin göndermesi durumunda bile
     # içindeki sayıyı doğru bir şekilde ayrıştırır.

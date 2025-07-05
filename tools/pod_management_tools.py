@@ -2,9 +2,13 @@
 
 import requests
 import json
+import os
 from typing import Dict, Any
 from langchain.tools import tool
 from pydantic import BaseModel, Field
+
+# 🚨 ACİL GÜVENLİK AYARI - Simulation Mode
+SIMULATION_MODE = os.getenv("RUNPOD_SIMULATION_MODE", "true").lower() == "true"
 
 # Proje yapılandırmasını import et
 try:

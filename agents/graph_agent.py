@@ -22,9 +22,10 @@ from tools.operational_tools import find_and_prepare_gpu
 from tools.pod_management_tools import execute_command_on_pod, get_pod_status
 
 
-# 1. Yeni "Beyaz Tahta" (AgentState) - Çok Adımlı Hafıza
+# 1. Yeni "Beyaz Tahta" (AgentState) - Çok Adımlı Hafıza + Akıllı Yönlendirme
 class AgentState(TypedDict):
     input: str                          # Kullanıcının orijinal görevi
+    route_decision: str                 # Yönlendirme kararı: "chat" veya "task"
     plan: List[str]                     # Adımların planı (string listesi)
     executed_steps: Annotated[List[Dict], operator.add]  # Tamamlanan adımların sonuçları
     current_step_index: int             # Şu anki adım numarası
@@ -69,7 +70,83 @@ class GraphAgent:
             "details": f"Simulated execution with parameters: {kwargs}"
         }
 
-    # === İŞ İSTASYONU 1: PLANLAMA DÜĞÜMÜ ===
+    # === YENİ İŞ İSTASYONU 0: AKILLI YÖNLENDİRİCİ DÜĞÜMÜ ===
+    def route_query(self, state: AgentState) -> Dict:
+        """
+        Kullanıcının girdisini analiz eder ve "chat" mi "task" mı olduğuna karar verir.
+        Bu, grafiğin "kapıdaki güvenlik görevlisi"sidir.
+        """
+        print("\n🚪 [YÖNLENDİRİCİ] Kullanıcı girdisi analiz ediliyor...")
+        
+        routing_prompt = ChatPromptTemplate.from_messages([
+            ("system", """Sen, kullanıcı girdilerini kategorize eden uzman bir analiz sistemisin.
+            
+Görevin: Verilen girdiyi analiz edip, sadece "chat" veya "task" kelimelerinden birini döndürmek.
+
+KURALLAR:
+- Eğer girdi selamlama, sohbet, basit soru ise -> "chat" 
+- Eğer girdi eylem, komut, plan gerektiriyorsa -> "task"
+
+ÖRNEKLERİ:
+- "merhaba" -> chat
+- "nasılsın" -> chat  
+- "GPU bul" -> task
+- "model eğit" -> task
+- "16GB VRAM ortam hazırla" -> task
+
+SADECE "chat" veya "task" kelimesini döndür, başka hiçbir şey yazma!"""),
+            ("user", "{input}")
+        ])
+        
+        try:
+            response = self.llm.invoke(routing_prompt.format_messages(input=state["input"]))
+            decision = response.content.strip().lower()
+            
+            # Güvenlik kontrolü - sadece geçerli değerler
+            if decision not in ["chat", "task"]:
+                decision = "chat"  # Şüpheli durumlarda güvenli tarafta kal
+                
+            print(f"📋 Yönlendirme Kararı: '{decision}' (Girdi: '{state['input']}')")
+            
+            return {"route_decision": decision}
+            
+        except Exception as e:
+            print(f"❌ Yönlendirici hatası: {e}")
+            return {"route_decision": "chat"}  # Hata durumunda güvenli mod
+
+    # === YENİ İŞ İSTASYONU 1: SOHBET DÜĞÜMÜ ===
+    def chatbot_step(self, state: AgentState) -> Dict:
+        """
+        Basit sohbet işlemlerini halleder. Hiçbir araç kullanmaz, sadece doğal sohbet.
+        """
+        print("\n💬 [SOHBET DÜĞÜMÜ] Doğal sohbet cevabı oluşturuluyor...")
+        
+        chat_prompt = ChatPromptTemplate.from_messages([
+            ("system", """Sen, Atölye Şefi isimli, yardımsever ve dostane bir AI asistanısın.
+            
+Özelliklerin:
+- MLOps ve AI konularında uzman
+- Docker, GPU, model eğitimi konularında bilgili
+- Sıcak ve samimi bir konuşma tarzın var
+- Türkçe konuşuyorsun
+
+Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
+            ("user", "{input}")
+        ])
+        
+        try:
+            response = self.llm.invoke(chat_prompt.format_messages(input=state["input"]))
+            result = response.content.strip()
+            
+            print(f"💭 Sohbet Cevabı: {result[:100]}...")
+            
+            return {"final_result": result}
+            
+        except Exception as e:
+            print(f"❌ Sohbet hatası: {e}")
+            return {"final_result": "Üzgünüm, şu anda bir sorun yaşıyorum. Tekrar dener misin?"}
+
+    # === İŞ İSTASYONU 2: PLANLAMA DÜĞÜMÜ ===
     def plan_step(self, state: AgentState) -> Dict:
         """
         Kullanıcının görevini analiz eder ve adım adım plan oluşturur.
@@ -306,37 +383,52 @@ class GraphAgent:
             print(f"🏁 [KARAR] Bitiş: Tüm {total_steps} adım tamamlandı")
             return "generate_response"
 
-    # === ŞEHIR HARİTASI (Graf Oluşturucu) ===
+    # === YENİ ŞEHIR HARİTASI (Akıllı Yönlendirmeli Graf Oluşturucu) ===
     def build_graph(self):
         """
-        Çok adımlı iş akışının grafiğini oluşturur.
+        Akıllı yönlendirme sistemi ile çok adımlı iş akışının grafiğini oluşturur.
         """
         print("🗺️ GraphAgent haritası çiziliyor...")
         
         workflow = StateGraph(AgentState)
         
-        # İş istasyonlarını ekle
+        # YENİ İŞ İSTASYONLARI: Akıllı yönlendirme sistemi
+        workflow.add_node("route_query", self.route_query)      # Güvenlik görevlisi
+        workflow.add_node("chatbot_step", self.chatbot_step)    # Sohbet masası
+        
+        # ESKİ İŞ İSTASYONLARI: Karmaşık görev işleme sistemi  
         workflow.add_node("plan_step", self.plan_step)
         workflow.add_node("execute_step", self.execute_step) 
         workflow.add_node("generate_response", self.generate_response)
         
-        # Başlangıç noktası: Planlama
-        workflow.set_entry_point("plan_step")
+        # YENİ BAŞLANGIÇ NOKTASI: Artık güvenlik görevlisi kapıda!
+        workflow.set_entry_point("route_query")
         
-        # Yolları çiz
+        # YENİ AKILLI YOLLAR: Koşullu yönlendirme sistemi
+        workflow.add_conditional_edges(
+            "route_query",
+            lambda state: state["route_decision"],
+            {
+                "chat": "chatbot_step",        # Basit sohbet → Sohbet masası
+                "task": "plan_step"           # Karmaşık görev → Planlama bölümü  
+            }
+        )
+        
+        # SOHBET YOLU: Direkt bitişe gidiyor (hiç araç kullanmıyor)
+        workflow.add_edge("chatbot_step", END)
+        
+        # GÖREV YOLU: Eskiden olduğu gibi karmaşık süreç
         workflow.add_edge("plan_step", "execute_step")
         
-        # Koşullu yol: Adım döngüsü veya bitirme
         workflow.add_conditional_edges(
             "execute_step",
             self.should_continue_execution,
             {
-                "continue": "execute_step",        # Döngü: Bir sonraki adıma
-                "generate_response": "generate_response"  # Bitirme: Raporlama
+                "continue": "execute_step",              # Döngü: Bir sonraki adıma
+                "generate_response": "generate_response" # Bitirme: Raporlama
             }
         )
         
-        # Son durak
         workflow.add_edge("generate_response", END)
         
         print("✅ Graf başarıyla oluşturuldu!")
@@ -344,12 +436,13 @@ class GraphAgent:
 
     def run(self, query: str) -> Dict:
         """
-        Çok adımlı görev yürütücüsü.
+        Akıllı yönlendirmeli görev yürütücüsü.
         """
         print(f"\n🚀 [GÖREV BAŞLADI] {query}")
         
         initial_state = {
             "input": query,
+            "route_decision": "",     # YENİ: Yönlendirme kararı
             "plan": [],
             "executed_steps": [], 
             "current_step_index": 0,

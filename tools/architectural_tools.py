@@ -30,6 +30,12 @@ from langchain_groq import ChatGroq
 # belirli bir şemaya (schema) uymaya zorluyoruz. Bu, cevabın her zaman
 # beklediğimiz formatta (JSON) olmasını garanti eder ve kodumuzu daha
 # güvenilir ve hataya dayanıklı hale getirir.
+class ArchitectureInput(BaseModel):
+    """decide_architecture tool'u için input schema."""
+    problem_description: str = Field(
+        ..., description="Analiz edilecek problemin açıklaması."
+    )
+
 class ArchitectureDecision(BaseModel):
     """LLM'in mimari kararını yapılandırmak için veri modeli."""
     selected_architecture: Literal["Transformer", "SSM (Mamba)"] = Field(
@@ -43,7 +49,7 @@ class ArchitectureDecision(BaseModel):
     )
 
 
-@tool(args_schema=None)
+@tool(args_schema=ArchitectureInput)
 def decide_architecture(problem_description: str) -> Dict:
     """
     Verilen bir probleme en uygun AI mimarisini (Transformer veya SSM) seçer.

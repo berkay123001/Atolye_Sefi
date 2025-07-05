@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     
     # YENİ EKLENDİ: RunPod API'sine erişim için gerekli anahtar.
     RUNPOD_API_KEY: str
+    
+    # 🚨 GÜVENLİK AYARI: RunPod simulation mode
+    RUNPOD_SIMULATION_MODE: str = "true"
 
     # Varsayılan değeri olan, opsiyonel alanlar.
     AGENT_MODEL_NAME: str = "llama3-70b-8192"
