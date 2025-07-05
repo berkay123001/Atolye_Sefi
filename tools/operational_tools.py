@@ -48,6 +48,7 @@ def _prepare_environment_internal(gpu_type_id: str) -> Dict:
           imageName: "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
           gpuCount: 1,
           volumeInGb: 40,
+          volumeMountPath: "/workspace",
           containerDiskInGb: 5
         }}
       ) {{ id, imageName, machineId }}
