@@ -1,348 +1,291 @@
-# tools/pod_management_tools.py
-
-import requests
-import json
 import os
+import time
+import requests
 from typing import Dict, Any
-from langchain.tools import tool
-from pydantic import BaseModel, Field
+from dotenv import load_dotenv
+from langchain_core.tools import tool
+from pydantic.v1 import BaseModel, Field
 
-# 🚨 ACİL GÜVENLİK AYARI - Simulation Mode
-SIMULATION_MODE = os.getenv("RUNPOD_SIMULATION_MODE", "true").lower() == "true"
+# .env dosyasındaki RUNPOD_API_KEY'i yükle
+load_dotenv()
+API_KEY = os.getenv("RUNPOD_API_KEY")
+GRAPHQL_URL = "https://api.runpod.io/graphql"
 
-# Proje yapılandırmasını import et
-try:
-    from config import settings
-except ImportError:
-    print("Hata: config.py bulunamadı.")
-    raise
+if not API_KEY:
+    raise ValueError("RUNPOD_API_KEY bulunamadı. Lütfen .env dosyanızı kontrol edin.")
 
+HEADERS = {"Authorization": f"Bearer {API_KEY}"}
 
-class ExecuteCommandInput(BaseModel):
-    """RunPod'da komut çalıştırma aracı için girdi şeması."""
-    pod_id: str = Field(description="Komutun çalıştırılacağı Pod'un ID'si")
-    command: str = Field(description="Pod üzerinde çalıştırılacak komut")
-
-
-def _run_graphql_query(query: str, variables: Dict[str, Any] = None) -> Dict:
-    """RunPod GraphQL API'sine bir sorgu gönderir ve sonucu döndürür."""
-    api_url = "https://api.runpod.io/graphql"
-    headers = {
-        "Authorization": f"Bearer {settings.RUNPOD_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    payload = {"query": query}
-    if variables:
-        payload["variables"] = variables
-    
+def _run_graphql_query(query: str, variables: Dict = None) -> Dict:
+    """GraphQL sorgusu çalıştırmak için yardımcı fonksiyon."""
     try:
-        response = requests.post(api_url, headers=headers, json=payload)
-        
-        if response.status_code != 200:
-            try:
-                error_details = response.json()
-            except json.JSONDecodeError:
-                error_details = response.text
-            
-            return {
-                "errors": [{
-                    "message": f"API'den {response.status_code} hatası alındı.",
-                    "details": error_details
-                }]
-            }
-        
+        response = requests.post(GRAPHQL_URL, json={"query": query, "variables": variables or {}}, headers=HEADERS)
+        response.raise_for_status()
         return response.json()
-        
     except requests.exceptions.RequestException as e:
-        print(f"[GraphQL Hata] İstek gönderilemedi: {e}")
+        print(f"GraphQL isteği sırasında hata: {e}")
+        if e.response:
+            print(f"Hata Detayı: {e.response.text}")
         return {"errors": [{"message": str(e)}]}
 
-
-@tool(args_schema=ExecuteCommandInput)
-def execute_command_on_pod(pod_id: str, command: str) -> Dict:
-    """
-    RunPod GraphQL API kullanarak belirtilen Pod ID'deki ortamda gerçek bir komut çalıştırır.
-    podExec mutation kullanarak Pod içinde komut execution yapar.
-    
-    Args:
-        pod_id (str): Komutun çalıştırılacağı Pod'un ID'si
-        command (str): Pod üzerinde çalıştırılacak komut
-    
-    Returns:
-        Dict: İşlem sonucu (başarı/hata durumu, komut çıktısı, vb.)
-    """
-    print(f"\n[Pod Management] Pod '{pod_id}'da gerçek komut çalıştırılıyor: {command}")
-    
-    # RunPod'un resmi podExec GraphQL mutation sorgusu
+def _start_pod(pod_id: str) -> Dict:
+    """Belirtilen ID'ye sahip bir pod'u başlatır."""
+    print(f"[Pod Start] Pod '{pod_id}' başlatılıyor...")
     mutation = """
-    mutation podExec($podId: String!, $command: String!) {
-      podExec(input: {podId: $podId, command: $command, stdin: ""}) {
-        output
-        done
-      }
-    }
-    """
-    
-    variables = {
-        "podId": pod_id,
-        "command": command
-    }
-    
-    try:
-        result = _run_graphql_query(mutation, variables)
-        
-        # Hata kontrolü
-        if "errors" in result:
-            error_messages = [error.get("message", "Bilinmeyen hata") for error in result["errors"]]
-            return {
-                "status": "error",
-                "message": f"RunPod API hatası: {'; '.join(error_messages)}",
-                "details": result["errors"]
-            }
-        
-        # Başarılı sonuç
-        if "data" in result and "podExec" in result["data"]:
-            pod_exec_data = result["data"]["podExec"]
-            
-            command_output = pod_exec_data.get("output", "")
-            is_done = pod_exec_data.get("done", False)
-            
-            print(f"[Pod Management] Komut başarıyla çalıştırıldı. Tamamlandı: {is_done}")
-            print(f"[Pod Management] Komut çıktısı:\n{command_output}")
-            
-            return {
-                "status": "success",
-                "message": f"Pod '{pod_id}'da komut başarıyla çalıştırıldı: {command}",
-                "command_output": command_output,
-                "is_completed": is_done,
-                "pod_id": pod_id,
-                "command": command
-            }
-        else:
-            return {
-                "status": "error",
-                "message": "API'den beklenmeyen yanıt formatı alındı",
-                "details": result
-            }
-            
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Komut çalıştırma hatası: {str(e)}",
-            "exception_type": type(e).__name__
+    mutation podResume($input: PodResumeInput!) {
+        podResume(input: $input) {
+            id
+            desiredStatus
+            lastStatusChange
         }
-
-
-@tool
-def get_pod_status(pod_id: str) -> Dict:
+    }
     """
-    RunPod GraphQL API kullanarak belirtilen Pod'un gerçek durumunu sorgular.
+    variables = {"input": {"podId": pod_id, "gpuCount": 1}}
+    result = _run_graphql_query(mutation, variables)
+    if "errors" in result or not result.get("data", {}).get("podResume"):
+        error_message = result.get("errors", [{}])[0].get("message", "Bilinmeyen bir hata oluştu.")
+        print(f"❌ Pod başlatılamadı: {error_message}")
+        return {"status": "error", "message": f"Pod '{pod_id}' başlatılamadı.", "details": error_message}
     
-    Args:
-        pod_id (str): Durumu sorgulanacak Pod'un ID'si
-    
-    Returns:
-        Dict: Pod'un mevcut durumu ve detayları
-    """
-    print(f"\n[Pod Management] Pod '{pod_id}' gerçek durumu sorgulanıyor...")
-    
-    # GraphQL query sorgusu
+    print(f"[Pod Start] Pod '{pod_id}' başlatma komutu gönderildi")
+    return {"status": "success", "message": f"Pod '{pod_id}' başarıyla başlatıldı", "pod_id": pod_id, **result["data"]["podResume"]}
+
+def _get_web_terminal_info(pod_id: str) -> Dict:
+    """Pod'un Web Terminal bilgilerini alır."""
     query = """
-    query pod($podId: String!) {
-      pod(input: {podId: $podId}) {
-        id
-        name
-        runtime {
-          uptimeInSeconds
+    query pods {
+        myself {
+            pods {
+                id
+                name
+                machine {
+                    podHostId
+                }
+                runtime {
+                    uptimeInSeconds
+                    ports {
+                        ip
+                        isIpPublic
+                        privatePort
+                        publicPort
+                        type
+                    }
+                }
+            }
         }
-        desiredStatus
-        lastStatusChange
+    }
+    """
+    
+    result = _run_graphql_query(query, {})
+    pods = result.get("data", {}).get("myself", {}).get("pods", [])
+    
+    for pod in pods:
+        if pod.get("id") == pod_id:
+            runtime = pod.get("runtime", {})
+            if runtime:
+                ports = runtime.get("ports", [])
+                
+                # Jupyter Notebook URL (8888 portu)
+                jupyter_url = f"https://{pod_id}-8888.proxy.runpod.net/lab/"
+                
+                # Web Terminal için SSH port bulma (genellikle 22)
+                ssh_port = None
+                for port in ports:
+                    if port.get("privatePort") == 22:
+                        ssh_port = port.get("publicPort")
+                        break
+                
+                return {
+                    "jupyter_url": jupyter_url,
+                    "ssh_port": ssh_port,
+                    "uptime": runtime.get("uptimeInSeconds", 0),
+                    "total_ports": len(ports),
+                    "pod_name": pod.get("name", ""),
+                    "machine_host": pod.get("machine", {}).get("podHostId", "")
+                }
+    
+    return None
+
+class PrepareEnvironmentInput(BaseModel):
+    gpu_type_id: str = Field(description="Oluşturulacak Pod için GPU tipi ID'si. Örneğin: 'NVIDIA GeForce RTX 3070'")
+
+@tool(args_schema=PrepareEnvironmentInput)
+def prepare_environment_with_ssh(gpu_type_id: str) -> Dict[str, Any]:
+    """
+    Pod oluşturur, HAZIR OLMASINI BEKLER ve yeni Proxy URL'ini alarak başlatır.
+    Önce pod'u oluşturur, ardından Web Terminal için doğru proxy URL aktif olana kadar periyodik olarak kontrol eder.
+    """
+    print(f"\n[Pod Management] Pod oluşturuluyor...")
+    print(f"🔑 GPU Type: {gpu_type_id}")
+
+    mutation = """
+    mutation PodFindAndDeployOnDemand($input: PodFindAndDeployOnDemandInput!) {
+      podFindAndDeployOnDemand(input: $input) {
+        id
+        imageName
+        machineId
       }
     }
     """
-    
     variables = {
-        "podId": pod_id
+        "input": {
+            "cloudType": "COMMUNITY",
+            "gpuTypeId": gpu_type_id,
+            "name": f"atolye-sefi-final-{int(time.time())}",
+            "imageName": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+            "gpuCount": 1,
+            "volumeInGb": 40,
+            "volumeMountPath": "/workspace",
+            "containerDiskInGb": 10,
+            "startSsh": True,
+            "startJupyter": True,
+            "ports": "8888/http",
+            "env": [{"key": "JUPYTER_PASSWORD", "value": "atolye123"}]
+        }
     }
-    
+
     try:
-        result = _run_graphql_query(query, variables)
-        
-        # Hata kontrolü
-        if "errors" in result:
-            error_messages = [error.get("message", "Bilinmeyen hata") for error in result["errors"]]
-            return {
-                "status": "error",
-                "message": f"Pod durumu sorgulanamadı: {'; '.join(error_messages)}",
-                "details": result["errors"]
-            }
-        
-        # Başarılı sonuç
-        if "data" in result and "pod" in result["data"]:
-            pod_data = result["data"]["pod"]
+        creation_result = _run_graphql_query(mutation, variables)
+        if "errors" in creation_result:
+            return {"status": "error", "message": f"Pod oluşturma hatası: {creation_result['errors'][0].get('message')}"}
+
+        pod_data = creation_result.get("data", {}).get("podFindAndDeployOnDemand")
+        if not pod_data:
+            return {"status": "error", "message": "Pod oluşturulamadı - uygun GPU bulunamamış olabilir."}
+
+        pod_id = pod_data.get("id")
+        image_name = pod_data.get("imageName")
+        print(f"✅ Pod temel kaydı oluşturuldu! ID: {pod_id}")
+        print(f"🖼️  Image: {image_name}")
+        print(f"\n⏳ Pod'un Proxy URL'inin aktif hale gelmesi bekleniyor...")
+
+        web_terminal_url = None
+        max_attempts = 15
+        for attempt in range(max_attempts):
+            print(f"   - Proxy URL kontrol denemesi [{attempt + 1}/{max_attempts}]...")
             
-            if pod_data is None:
-                return {
-                    "status": "error",
-                    "message": f"Pod '{pod_id}' bulunamadı veya erişim izni yok"
-                }
-            
-            runtime_info = pod_data.get("runtime") or {}
-            
-            # desiredStatus'u state olarak kullan
-            pod_state = pod_data.get("desiredStatus", "UNKNOWN")
-            
-            print(f"[Pod Management] Pod '{pod_id}' durumu: {pod_state}")
-            
-            uptime_seconds = runtime_info.get("uptimeInSeconds", 0) if runtime_info else 0
-            
-            return {
-                "status": "success",
-                "pod_info": {
-                    "id": pod_data.get("id"),
-                    "name": pod_data.get("name"),
-                    "state": pod_state,
-                    "desired_status": pod_data.get("desiredStatus"),
-                    "last_status_change": pod_data.get("lastStatusChange"),
-                    "uptime_seconds": uptime_seconds,
-                    "uptime_minutes": round(uptime_seconds / 60, 2) if uptime_seconds else 0
+            # Düzeltilmiş GraphQL sorgusu - pods listesi üzerinden ID ile arama
+            status_query = """
+            query pods {
+                myself {
+                    pods {
+                        id
+                        runtime {
+                            uptimeInSeconds
+                            ports {
+                                ip
+                                isIpPublic
+                                privatePort
+                                publicPort
+                                type
+                            }
+                        }
+                    }
                 }
             }
-        else:
-            return {
-                "status": "error",
-                "message": "API'den beklenmeyen yanıt formatı alındı",
-                "details": result
-            }
+            """
+            status_result = _run_graphql_query(status_query, {})
             
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": f"Pod '{pod_id}' durumu sorgulanamadı: {str(e)}",
-            "exception_type": type(e).__name__
-        }
-
-
-def test_pod_management_workflow():
-    """
-    Pod management araçlarının tam entegrasyon testi.
-    1. Pod oluşturma (operational_tools.find_and_prepare_gpu)
-    2. Pod durumu kontrolü (get_pod_status)
-    3. Pod'da komut çalıştırma (execute_command_on_pod)
-    """
-    print("\n" + "="*60)
-    print("🧪 POD MANAGEMENT ARAÇLARI TAM TEST BAŞLIYOR")
-    print("="*60)
-    
-    try:
-        # 1. ADIM: Pod oluşturma
-        print("\n1️⃣ ADIM: Pod oluşturuluyor...")
-        from tools.operational_tools import find_and_prepare_gpu
-        
-        pod_creation_result = find_and_prepare_gpu.invoke({})
-        print(f"Pod oluşturma sonucu: {pod_creation_result}")
-        
-        if pod_creation_result.get("status") != "success":
-            print("❌ Pod oluşturulamadı, test durduruluyor.")
-            return pod_creation_result
-        
-        # Pod ID'yi al
-        pod_id = pod_creation_result.get("pod_info", {}).get("id")
-        if not pod_id:
-            print("❌ Pod ID bulunamadı, test durduruluyor.")
-            print(f"Pod creation result: {pod_creation_result}")
-            return {"status": "error", "message": "Pod ID alınamadı"}
-        
-        print(f"✅ Pod başarıyla oluşturuldu. Pod ID: {pod_id}")
-        
-        # 2. ADIM: Pod durumu kontrolü
-        print(f"\n2️⃣ ADIM: Pod '{pod_id}' durumu kontrol ediliyor...")
-        
-        # Pod'un hazır olması için kısa bir bekleme
-        import time
-        print("Pod'un başlatılması için 10 saniye bekleniyor...")
-        time.sleep(10)
-        
-        status_result = get_pod_status.invoke({"pod_id": pod_id})
-        print(f"Pod durum sorgusu sonucu: {status_result}")
-        
-        if status_result.get("status") != "success":
-            print("❌ Pod durumu sorgulanamadı.")
-            return status_result
-        
-        pod_state = status_result.get("pod_info", {}).get("state")
-        print(f"✅ Pod durumu alındı: {pod_state}")
-        
-        if pod_state == "RUNNING":
-            print("🟢 Pod RUNNING durumunda, komut çalıştırmaya hazır!")
-        else:
-            print(f"🟡 Pod henüz {pod_state} durumunda, yine de komut deneyeceğiz.")
-        
-        # 3. ADIM: Pod'da komut çalıştırma
-        print(f"\n3️⃣ ADIM: Pod '{pod_id}'da test komutu çalıştırılıyor...")
-        
-        test_command = "ls -l /workspace"
-        command_result = execute_command_on_pod.invoke({"pod_id": pod_id, "command": test_command})
-        print(f"Komut çalıştırma sonucu: {command_result}")
-        
-        if command_result.get("status") == "success":
-            print("✅ Komut başarıyla çalıştırıldı!")
-            output = command_result.get("command_output", "")
-            is_completed = command_result.get("is_completed", False)
-            print(f"📋 Komut tamamlandı: {is_completed}")
-            print(f"📄 Komut çıktısı:\n{output}")
-        else:
-            print("❌ Komut çalıştırılamadı.")
+            # Pods listesinden bizim pod'umuzu bulalım
+            pods = status_result.get("data", {}).get("myself", {}).get("pods", [])
+            current_pod = None
+            for pod in pods:
+                if pod.get("id") == pod_id:
+                    current_pod = pod
+                    break
             
-        # 4. ADIM: Test özeti
-        print(f"\n4️⃣ TEST ÖZETİ:")
-        print(f"Pod ID: {pod_id}")
-        print(f"Pod Durumu: {pod_state}")
-        print(f"Komut Durumu: {command_result.get('status')}")
-        print(f"Komut Tamamlandı: {command_result.get('is_completed', 'N/A')}")
-        print(f"Workspace İçeriği Görüntülendi: {'Evet' if command_result.get('status') == 'success' else 'Hayır'}")
+            if current_pod and current_pod.get("runtime"):
+                runtime = current_pod.get("runtime", {})
+                uptime = runtime.get("uptimeInSeconds", 0)
+                ports = runtime.get("ports", [])
+                
+                print(f"   📊 Pod durumu: {len(ports)} port mevcut, çalışma süresi: {uptime}s")
+                
+                # Port 8888'i arıyoruz (Jupyter Notebook)
+                jupyter_url = None
+                for port in ports:
+                    if port.get("privatePort") == 8888:
+                        # Jupyter için doğru URL formatı
+                        jupyter_url = f"https://{pod_id}-8888.proxy.runpod.net/lab/"
+                        print(f"   ✅ Jupyter Notebook hazır: {jupyter_url}")
+                        break
+                
+                # Şimdilik Jupyter URL'ini web_terminal_url olarak kullanıyoruz
+                if jupyter_url:
+                    web_terminal_url = jupyter_url
+            if web_terminal_url:
+                print(f"   ✅ Çalışan Proxy URL başarıyla bulundu!")
+                break
+            else:
+                print(f"   - Proxy URL (port 8888) henüz hazır değil, bekleniyor...")
+                if attempt < max_attempts - 1:
+                     time.sleep(15)
+
+        if not web_terminal_url:
+            return {"status": "error", "message": "Zaman aşımı: Web Terminal için Proxy URL hazır hale gelmedi."}
         
-        final_result = {
+        print(f"\n🚀 Pod '{pod_id}' durumu doğrulanıyor...")
+        start_result = _start_pod(pod_id)
+
+        print("\n✅✅✅ ORTAM HAZIRLAMA BAŞARILI ✅✅✅")
+        
+        # Web Terminal bilgilerini al
+        terminal_info = _get_web_terminal_info(pod_id)
+        
+        response = {
             "status": "success",
-            "message": "Pod management workflow testi tamamlandı",
-            "test_results": {
-                "pod_creation": pod_creation_result.get("status"),
-                "pod_status_check": status_result.get("status"),
-                "command_execution": command_result.get("status"),
-                "pod_id": pod_id,
-                "pod_state": pod_state,
-                "command_completed": command_result.get("is_completed"),
-                "workspace_accessible": command_result.get("status") == "success"
-            }
+            "message": "Pod başarıyla oluşturuldu, başlatıldı ve Jupyter Notebook hazır.",
+            "pod_id": pod_id,
+            "image_name": image_name,
+            "start_result": start_result,
+            "jupyter_url": web_terminal_url,
+            "jupyter_ready": True,
+            "terminal_info": terminal_info
         }
         
-        print("\n🎉 TAM ENTEGRASYON TESTİ TAMAMLANDI!")
-        print("="*60)
+        print(f"\n🔗 Jupyter Notebook: {web_terminal_url}")
+        if terminal_info and terminal_info.get("ssh_port"):
+            print(f"🔗 SSH Port: {terminal_info['ssh_port']}")
+            print(f"📊 Pod Bilgileri: {terminal_info['total_ports']} port, {terminal_info['uptime']}s çalışma süresi")
         
-        return final_result
-        
-    except Exception as e:
-        error_result = {
-            "status": "error",
-            "message": f"Test sırasında hata oluştu: {str(e)}",
-            "exception_type": type(e).__name__
-        }
-        print(f"\n❌ TEST HATASI: {error_result}")
-        print("="*60)
-        return error_result
+        return response
 
+    except Exception as e:
+        return {"status": "error", "message": f"Pod hazırlama sırasında beklenmedik bir hata oluştu: {str(e)}"}
+
+def main_test():
+    """Ana test fonksiyonu."""
+    print("================================================================================")
+    print("🧪 WEB TERMINAL TABANLI POD MANAGEMENT ARAÇLARI - TAM TEST BAŞLIYOR")
+    print("================================================================================")
+
+    print("\n1️⃣ ADIM: Pod oluşturuluyor ve Web Terminal bilgilerinin hazır olması bekleniyor...")
+    
+    gpu_to_test = "NVIDIA GeForce RTX 3070" 
+    
+    result = prepare_environment_with_ssh.invoke({"gpu_type_id": gpu_to_test})
+
+    print("\n---------------------- SONUÇ ----------------------")
+    print(f"İşlem Durumu: {result.get('status')}")
+    print(f"Mesaj: {result.get('message')}")
+    print(f"Pod ID: {result.get('pod_id')}")
+    
+    if result.get('status') == 'success':
+        print(f"Jupyter Notebook URL: {result.get('jupyter_url')}")
+        
+        terminal_info = result.get('terminal_info')
+        if terminal_info:
+            print(f"SSH Port: {terminal_info.get('ssh_port', 'Henüz hazır değil')}")
+            print(f"Pod Çalışma Süresi: {terminal_info.get('uptime', 0)}s")
+        
+        print("\n✅ POD HAZIRLAMA TESTİ BAŞARILI!")
+        print("\n📋 KULLANIM TALİMATLARI:")
+        print("1. Jupyter Notebook için yukarıdaki URL'i kullanın")
+        print("2. Şifre: atolye123")
+        print("3. Web Terminal için RunPod Console'dan manuel olarak başlatın")
+    else:
+        print("\n❌ POD HAZIRLAMA TESTİ BAŞARISIZ!")
+        print(f"Detaylar: {result}")
 
 if __name__ == "__main__":
-    """
-    Bu dosya doğrudan çalıştırıldığında tam entegrasyon testini başlat.
-    Kullanım: python tools/pod_management_tools.py
-    """
-    print("🚀 Pod Management Araçları - Doğrudan Test Modu")
-    result = test_pod_management_workflow()
-    
-    if result.get("status") == "success":
-        print("\n✅ TÜM TESTLERİN BAŞARILI!")
-    else:
-        print(f"\n❌ TEST BAŞARISIZ: {result.get('message')}")
-        exit(1)
+    main_test()
