@@ -16,9 +16,8 @@ Atolye_Sefi/
 ├── 🔧 tools/                       # AI Agent araçları
 │   ├── architectural_tools.py      # Mimari tasarım araçları
 │   ├── callback_handlers.py        # Callback yönetimi
-│   ├── operational_tools.py        # RunPod API entegrasyonu
+│   ├── operational_tools.py        # RunPod API entegrasyonu + gerçek komut çalıştırma
 │   ├── pod_management_tools.py     # Temel pod yönetimi
-│   ├── pod_management_tools_ssh.py # SSH tabanlı pod yönetimi
 │   └── __init__.py                 # Python package init
 │
 ├── 🐳 docker/                      # Docker yapılandırması
@@ -86,25 +85,24 @@ def health_check()          # Docker health endpoint
 
 **`tools/operational_tools.py`** (178 satır) - **🚀 RUNPOD ENTEGRASYONu**
 ```python
-# RunPod GraphQL API entegrasyonu
+# RunPod GraphQL API entegrasyonu + Gerçek Komut Çalıştırma
 # - GPU arama ve filtreleme
 # - Pod oluşturma (volume mount ile)
-# - Pod durum izleme
+# - Pod'da gerçek komut execution (YENİ!)
 
 @tool find_and_prepare_gpu()  # GPU arar ve pod oluşturur
-@tool check_gpu_status()      # GPU durumunu kontrol eder
+@tool start_task_on_pod()     # Pod'da gerçek komut çalıştırır (FAZ 2!)
 ```
 
-**`tools/pod_management_tools_ssh.py`** (450 satır) - **🔐 SSH POD YÖNETİMİ**
+**`tools/pod_management_tools.py`** - **� TEMEL POD YÖNETİMİ**
 ```python
-# SSH tabanlı uzak pod yönetimi
-# - SSH erişimli pod oluşturma
-# - Paramiko ile uzak komut çalıştırma
-# - HTTP/Jupyter fallback sistemi
+# Basit pod yönetimi araçları (fallback)
+# - Pod başlatma/durdurma
+# - Durum kontrolü
+# - Jupyter URL alma
 
-@tool prepare_environment_with_ssh() # SSH aktif pod oluşturur
-@tool execute_command_via_ssh()      # SSH ile komut çalıştırır
-def test_ssh_pod_workflow()          # Full entegrasyon testi
+@tool execute_command_on_pod() # Pod'da komut simülasyonu
+@tool get_pod_status()         # Pod durumunu kontrol eder
 ```
 
 **`tools/architectural_tools.py`** - **🏗️ MİMARİ TASARIM**

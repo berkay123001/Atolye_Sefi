@@ -110,80 +110,109 @@ def _get_web_terminal_info(pod_id: str) -> Dict:
     
     return None
 
-# --- ÇALIŞAN POD CREATION TOOL ---
+def _get_available_gpus_internal() -> List[Dict]:
+    """Mevcut GPU tiplerini listeler (eski uyumluluk için)."""
+    graphql_query = "query GpuTypes { gpuTypes { id displayName memoryInGb } }"
+    data = _run_graphql_query(graphql_query)
+    if "errors" in data and data.get("errors"): 
+        return []
+    return data.get("data", {}).get("gpuTypes", [])
 
-class FindAndPrepareGpuInput(BaseModel):
-    min_memory_gb: Any = Field(description="Minimum VRAM gereksinimi (GB). Varsayılan: 16", default=16)
+def _prepare_environment_internal(gpu_type_id: str) -> Dict:
+    unique_pod_name = f"AtolyeSefi-Pod-{gpu_type_id.replace(' ', '-').lower()}-{int(time.time())}"
+    graphql_mutation = f'''
+    mutation podFindAndDeployOnDemand {{
+      podFindAndDeployOnDemand(
+        input: {{
+          cloudType: COMMUNITY,
+          gpuTypeId: "{gpu_type_id}",
+          name: "{unique_pod_name}",
+          imageName: "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
+          gpuCount: 1,
+          volumeInGb: 40,
+          volumeMountPath: "/workspace",
+          containerDiskInGb: 5
+        }}
+      ) {{ id, imageName, machineId }}
+    }}
+    '''
+    return _run_graphql_query(graphql_mutation)
 
-@tool(args_schema=FindAndPrepareGpuInput)
+# --- "Usta" Araç ---
+
+@tool
 def find_and_prepare_gpu(min_memory_gb: Any = 16) -> Dict:
     """
     Belirtilen minimum VRAM'e sahip GPU'yu bulur ve GERÇEK Pod oluşturur.
-    Pod'un tam olarak hazır olmasını bekler ve doğru Jupyter URL'ini döndürür.
+    Basitleştirilmiş, over-engineering olmayan versiyon.
     """
-    # GPU seçimi için temel mantık (basitleştirilmiş)
-    gpu_priority = ["NVIDIA RTX A4000", "NVIDIA GeForce RTX 3070", "NVIDIA RTX A5000"]
-    
-    print(f"\n[Pod Creator] GPU aranıyor (Min VRAM: {min_memory_gb}GB)...")
-    
-    for gpu_type_id in gpu_priority:
-        print(f"[Pod Creator] '{gpu_type_id}' deneniyor...")
-        
-        mutation = """
-        mutation PodFindAndDeployOnDemand($input: PodFindAndDeployOnDemandInput!) {
-          podFindAndDeployOnDemand(input: $input) {
-            id
-            imageName
-            machineId
-          }
-        }
-        """
-        variables = {
-            "input": {
-                "cloudType": "COMMUNITY",
-                "gpuTypeId": gpu_type_id,
-                "name": f"AtolyeSefi-Pod-{gpu_type_id.replace(' ', '-').lower()}-{int(time.time())}",
-                "imageName": "runpod/pytorch:2.1.0-py3.10-cuda11.8.0-devel-ubuntu22.04",
-                "gpuCount": 1,
-                "volumeInGb": 40,
-                "volumeMountPath": "/workspace",
-                "containerDiskInGb": 10,
-                "startSsh": True,
-                "startJupyter": True,
-                "ports": "8888/http",
-                "env": [{"key": "JUPYTER_PASSWORD", "value": "atolye123"}]
-            }
-        }
+    # 1. ADIM: Girdileri temizle
+    parsed_min_memory_gb = 16
+    if isinstance(min_memory_gb, str):
+        match = re.search(r'\d+', min_memory_gb)
+        if match:
+            parsed_min_memory_gb = int(match.group(0))
+    elif isinstance(min_memory_gb, int):
+        parsed_min_memory_gb = min_memory_gb
 
+    print(f"\n[Pod Creator] GPU aranıyor (Min VRAM: {parsed_min_memory_gb}GB)...")
+    
+    # 2. ADIM: GPU listesi al
+    all_gpus = _get_available_gpus_internal()
+    if not all_gpus:
+        return {"status": "error", "message": "GPU listesi alınamadı."}
+
+    # API'den gelen veriyi temizle
+    def to_int_safe(value: Any) -> int:
         try:
-            creation_result = _run_graphql_query(mutation, variables)
-            if "errors" in creation_result:
-                error_msg = creation_result['errors'][0].get('message', '')
-                if "instances available" in error_msg:
-                    print(f"[Pod Creator] '{gpu_type_id}' mevcut değil. Sonraki deneniyor...")
-                    continue
-                else:
-                    print(f"[Pod Creator] '{gpu_type_id}' için API hatası: {error_msg}")
-                    continue
+            return int(value)
+        except (ValueError, TypeError):
+            return 0
 
-            pod_data = creation_result.get("data", {}).get("podFindAndDeployOnDemand")
-            if not pod_data:
-                print(f"[Pod Creator] '{gpu_type_id}' için pod oluşturulamadı.")
+    suitable_gpus = [
+        gpu for gpu in all_gpus 
+        if to_int_safe(gpu.get('memoryInGb')) >= parsed_min_memory_gb
+    ]
+    
+    if not suitable_gpus:
+        return {"status": "error", "message": "Uygun GPU bulunamadı."}
+
+    # 3. ADIM: En uygun GPU'yu seç ve pod oluştur
+    priority_order = ["A4000", "A5000", "RTX 3090", "RTX 4090", "A100"]
+    sorted_gpus = sorted(
+        suitable_gpus,
+        key=lambda gpu: next((priority_order.index(p) for p in priority_order if p in gpu['id']), len(priority_order))
+    )
+    
+    for gpu in sorted_gpus:
+        gpu_id = gpu['id']
+        print(f"[Pod Creator] '{gpu_id}' deneniyor...")
+        result = _prepare_environment_internal(gpu_id)
+        
+        if "errors" in result and result.get("errors"):
+            error_message = result['errors'][0].get('message', '')
+            if "instances available" in error_message:
+                print(f"[Pod Creator] '{gpu_id}' mevcut değil. Sonraki deneniyor...")
                 continue
-
+            else:
+                return {"status": "error", "message": f"'{gpu_id}' için API hatası.", "details": error_message}
+        
+        pod_data = result.get("data", {}).get("podFindAndDeployOnDemand")
+        if pod_data:
+            print(f"[Pod Creator] BAŞARILI! '{gpu_id}' ile Pod oluşturuldu.")
+            
+            # 4. ADIM: Pod'un hazır olmasını bekle ve gerçek URL'i al
             pod_id = pod_data.get("id")
-            image_name = pod_data.get("imageName")
-            print(f"[Pod Creator] BAŞARILI! '{gpu_type_id}' ile Pod oluşturuldu.")
             print(f"[Pod Creator] Pod ID: {pod_id}")
-            print(f"[Pod Creator] Image: {image_name}")
-            print(f"\n⏳ Pod'un Proxy URL'inin aktif hale gelmesi bekleniyor...")
-
-            # Pod'un hazır olmasını bekle
-            web_terminal_url = None
+            print(f"[Pod Creator] Pod'un hazır olması bekleniyor...")
+            
+            # Pod'un ports bilgisini almak için bekleme döngüsü
+            jupyter_url = None
             max_attempts = 15
             for attempt in range(max_attempts):
-                print(f"   - Proxy URL kontrol denemesi [{attempt + 1}/{max_attempts}]...")
+                print(f"   - Pod hazırlık kontrol denemesi [{attempt + 1}/{max_attempts}]...")
                 
+                # Pod durumunu kontrol et
                 status_query = """
                 query pods {
                     myself {
@@ -203,7 +232,7 @@ def find_and_prepare_gpu(min_memory_gb: Any = 16) -> Dict:
                     }
                 }
                 """
-                status_result = _run_graphql_query(status_query, {})
+                status_result = _run_graphql_query(status_query)
                 
                 # Bizim pod'umuzu bul
                 pods = status_result.get("data", {}).get("myself", {}).get("pods", [])
@@ -223,61 +252,39 @@ def find_and_prepare_gpu(min_memory_gb: Any = 16) -> Dict:
                     # Port 8888'i arıyoruz (Jupyter Notebook)
                     for port in ports:
                         if port.get("privatePort") == 8888:
-                            web_terminal_url = f"https://{pod_id}-8888.proxy.runpod.net/lab/"
-                            print(f"   ✅ Jupyter Notebook hazır: {web_terminal_url}")
+                            jupyter_url = f"https://{pod_id}-8888.proxy.runpod.net/lab/"
+                            print(f"   ✅ Jupyter Notebook hazır: {jupyter_url}")
                             break
                     
-                    if web_terminal_url:
+                    if jupyter_url:
                         break
                 else:
                     print(f"   - Pod runtime henüz hazır değil, bekleniyor...")
                 
                 if attempt < max_attempts - 1:
                     time.sleep(10)
-
-            if not web_terminal_url:
-                web_terminal_url = f"https://{pod_id}-8888.proxy.runpod.net/lab/"
-                print(f"   ⚠️ Zaman aşımı - varsayılan URL kullanılıyor: {web_terminal_url}")
-
-            # Pod'u başlat
-            print(f"\n🚀 Pod '{pod_id}' durumu doğrulanıyor...")
-            start_result = _start_pod(pod_id)
-
-            print("\n✅✅✅ ORTAM HAZIRLAMA BAŞARILI ✅✅✅")
             
-            # Web Terminal bilgilerini al
-            terminal_info = _get_web_terminal_info(pod_id)
+            if not jupyter_url:
+                jupyter_url = f"https://{pod_id}-8888.proxy.runpod.net/lab/"
+                print(f"   ⚠️ Zaman aşımı - varsayılan URL kullanılıyor: {jupyter_url}")
             
-            response = {
-                "status": "success",
-                "message": f"'{gpu_type_id}' ile Pod başarıyla oluşturuldu.",
+            print(f"[Pod Creator] Final Jupyter URL: {jupyter_url}")
+            
+            return {
+                "status": "success", 
+                "message": f"'{gpu_id}' ile Pod başarıyla oluşturuldu.", 
                 "pod_info": pod_data,
                 "pod_id": pod_id,
-                "jupyter_url": web_terminal_url,
-                "image_name": image_name,
-                "start_result": start_result,
-                "jupyter_ready": True,
-                "terminal_info": terminal_info
+                "jupyter_url": jupyter_url
             }
-            
-            print(f"\n🔗 Jupyter Notebook: {web_terminal_url}")
-            if terminal_info and terminal_info.get("ssh_port"):
-                print(f"🔗 SSH Port: {terminal_info['ssh_port']}")
-                print(f"📊 Pod Bilgileri: {terminal_info['total_ports']} port, {terminal_info['uptime']}s çalışma süresi")
-            
-            return response
-
-        except Exception as e:
-            print(f"[Pod Creator] '{gpu_type_id}' için beklenmeyen hata: {str(e)}")
-            continue
 
     return {"status": "error", "message": "Hiçbir GPU şu anda mevcut değil."}
 
-# --- start_task_on_pod fonksiyonu ---
+# --- Pod Komut Çalıştırma Aracı ---
 
 class StartTaskInput(BaseModel):
-    pod_id: str = Field(description="Komutun çalıştırılacağı Pod ID'si")
-    command: str = Field(description="Pod içinde çalıştırılacak komut")
+    pod_id: str = Field(description="Komutun çalıştırılacağı Pod'un ID'si")
+    command: str = Field(description="Pod'da çalıştırılacak terminal komutu")
 
 @tool(args_schema=StartTaskInput)
 def start_task_on_pod(pod_id: str, command: str) -> Dict[str, Any]:
@@ -354,60 +361,61 @@ print("Return code:", result.returncode)'''
         "pod_id": pod_id
     }
 
-# --- Diğer fonksiyonlar ---
-
-def execute_command_on_pod(pod_id: str, command: str = "echo 'Command execution simulation'") -> Dict:
-    """
-    Eski uyumluluk için simülasyon fonksiyonu.
-    """
-    print(f"🔧 Pod '{pod_id}' üzerinde komut çalıştırılıyor: {command}")
-    return {"status": "error", "message": f"Pod '{pod_id}' bulunamadı veya çalışır durumda değil"}
-
-def get_pod_status(pod_id: str) -> Dict:
-    """
-    Pod durumunu kontrol eder.
-    """
-    print(f"📊 Pod '{pod_id}' durumu kontrol ediliyor...")
+# --- Test Bloğu: Gerçek Pod ile Komut Çalıştırma ---
+if __name__ == '__main__':
+    print("🧪 === FAZ 2 FİNAL TESLİMİ: GERÇEK POD KOMUT ÇALIŞTIRMA ===")
+    print("Bu test, gerçek bir Pod oluşturacak ve içinde komut çalıştıracak!\n")
     
-    query = """
-    query pods {
-        myself {
-            pods {
-                id
-                name
-                desiredStatus
-                runtime {
-                    uptimeInSeconds
-                    ports {
-                        privatePort
-                        publicPort
-                    }
-                }
-            }
-        }
-    }
-    """
+    # 1. ADIM: Gerçek Pod oluştur
+    print("1️⃣ ADIM: GPU Pod oluşturuluyor...")
+    pod_result = find_and_prepare_gpu.invoke({"min_memory_gb": 16})
     
-    result = _run_graphql_query(query, {})
-    pods = result.get("data", {}).get("myself", {}).get("pods", [])
+    if pod_result.get("status") != "success":
+        print(f"❌ Pod oluşturulamadı: {pod_result}")
+        exit(1)
     
-    for pod in pods:
-        if pod.get("id") == pod_id:
-            runtime = pod.get("runtime", {})
-            uptime = runtime.get("uptimeInSeconds", 0) if runtime else 0
-            ports = runtime.get("ports", []) if runtime else []
-            
-            return {
-                "status": "success",
-                "pod_id": pod_id,
-                "pod_name": pod.get("name", ""),
-                "desired_status": pod.get("desiredStatus", "UNKNOWN"),
-                "uptime": uptime,
-                "ports": ports,
-                "is_running": runtime is not None
-            }
+    pod_id = pod_result.get("pod_id")
+    if not pod_id:
+        # Fallback: pod_info'dan almaya çalış
+        pod_info = pod_result.get("pod_info", {})
+        pod_id = pod_info.get("id")
     
-    return {
-        "status": "error",
-        "message": f"Pod '{pod_id}' bulunamadı"
-    }
+    if not pod_id:
+        print("❌ Pod ID alınamadı!")
+        exit(1)
+        
+    print(f"✅ Pod başarıyla oluşturuldu! ID: {pod_id}")
+    print(f"🔗 Jupyter URL: {pod_result.get('jupyter_url', 'N/A')}")
+    
+    # 2. ADIM: Pod'un tamamen hazır olmasını bekle
+    print(f"\n2️⃣ ADIM: Pod'un RUNNING durumuna geçmesi bekleniyor...")
+    print("⏳ 60 saniye sabırlı bekleme (Pod başlatma süreci)...")
+    time.sleep(60)
+    
+    # 3. ADIM: Gerçek komut çalıştır
+    print(f"\n3️⃣ ADIM: Pod'da test komutu çalıştırılıyor...")
+    test_command = "echo 'Merhaba Atolye Sefi!' > /workspace/test.txt && ls -l /workspace && cat /workspace/test.txt"
+    
+    command_result = start_task_on_pod.invoke({
+        "pod_id": pod_id,
+        "command": test_command
+    })
+    
+    print("\n" + "="*80)
+    print("🎯 SONUÇLAR:")
+    print("="*80)
+    print(f"Pod Oluşturma: {pod_result.get('status')}")
+    print(f"Komut Çalıştırma: {command_result.get('status')}")
+    
+    if command_result.get("status") == "success":
+        print(f"✅ Job ID: {command_result.get('job_id')}")
+        print(f"✅ Status: {command_result.get('initial_status')}")
+        print(f"✅ Command: {command_result.get('command')}")
+        print("\n🎉 FAZ 2 TAMAMLANDI! Ajan artık gerçek Pod'larda komut çalıştırabiliyor!")
+    else:
+        print(f"❌ Komut çalıştırma hatası: {command_result.get('message')}")
+    
+    print("\n💡 Jupyter Notebook'u manuel kontrol için:")
+    print(f"   URL: {pod_result.get('jupyter_url', 'N/A')}")
+    print("   Password: atolye123")
+    print("="*80)

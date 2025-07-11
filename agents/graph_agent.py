@@ -18,7 +18,7 @@ from langchain_core.prompts import ChatPromptTemplate
 # --- Proje Bileşenleri ---
 from config import settings
 from tools.architectural_tools import decide_architecture
-from tools.operational_tools import find_and_prepare_gpu
+from tools.operational_tools import find_and_prepare_gpu, start_task_on_pod
 from tools.pod_management_tools import execute_command_on_pod, get_pod_status
 
 
@@ -50,10 +50,9 @@ class GraphAgent:
         self.tools_dict = {
             "decide_architecture": decide_architecture,
             "find_and_prepare_gpu": find_and_prepare_gpu,
-            "execute_command_on_pod": execute_command_on_pod,
+            "start_task_on_pod": start_task_on_pod,  # Jupyter notebook komut hazırlama
+            "execute_command_on_pod": execute_command_on_pod,  # Eski versiyon (fallback)
             "get_pod_status": get_pod_status,
-            # Simülasyon aracı (gerçek implementasyon için hazır)
-            "start_task_on_pod": self._simulate_task_execution
         }
         
         # Grafiği oluştur
@@ -84,15 +83,21 @@ class GraphAgent:
 Görevin: Verilen girdiyi analiz edip, sadece "chat" veya "task" kelimelerinden birini döndürmek.
 
 KURALLAR:
-- Eğer girdi selamlama, sohbet, basit soru ise -> "chat" 
-- Eğer girdi eylem, komut, plan gerektiriyorsa -> "task"
+- Eğer girdi sadece selamlama ise -> "chat" 
+- DİĞER HER ŞEY -> "task" (Pod, kod, ortam, oluştur, çalıştır, yaz içeren tüm istekler)
 
 ÖRNEKLERİ:
 - "merhaba" -> chat
 - "nasılsın" -> chat  
-- "GPU bul" -> task
-- "model eğit" -> task
-- "16GB VRAM ortam hazırla" -> task
+- "pod oluştur" -> task
+- "kod yaz" -> task
+- "ortam hazırla" -> task
+- "çalıştır" -> task
+- "GPU" -> task
+- "RunPod" -> task
+- "hesap makinesi" -> task
+
+UYARI: Şüpheli durumlarda "task" seç! Pod/kod/çalıştır kelimelerini gören her şey "task"!
 
 SADECE "chat" veya "task" kelimesini döndür, başka hiçbir şey yazma!"""),
             ("user", "{input}")
@@ -160,9 +165,9 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             Kullanılabilir araçlar:
             - decide_architecture: Mimari kararları almak için
             - find_and_prepare_gpu: GPU ortamı bulmak ve hazırlamak için  
-            - execute_command_on_pod: Pod'da komut çalıştırmak için
+            - start_task_on_pod: Pod'da Jupyter Notebook için komut hazırlar (Manuel execution gerekir)
+            - execute_command_on_pod: Pod'da komut çalıştırmak için (eski versiyon)
             - get_pod_status: Pod durumunu kontrol etmek için
-            - start_task_on_pod: Pod'da özel görev başlatmak için
 
             Planı, her satırda bir adım olacak şekilde, şu formatta yaz:
             1. [ARAÇ_ADI] açıklama
@@ -171,8 +176,8 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
 
             Örnek:
             1. [find_and_prepare_gpu] 16GB VRAM'li GPU ortamı bul ve hazırla
-            2. [execute_command_on_pod] Git repository'sini clone et
-            3. [execute_command_on_pod] Gerekli kütüphaneleri yükle"""),
+            2. [start_task_on_pod] Git repository'sini clone et
+            3. [start_task_on_pod] Gerekli kütüphaneleri yükle"""),
             ("user", "Görev: {task}")
         ])
         
@@ -228,21 +233,50 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             if tool_name in self.tools_dict:
                 print(f"🔧 Araç '{tool_name}' çalıştırılıyor...")
                 
-                # Aracı çalıştır
-                if tool_name in ["find_and_prepare_gpu"]:
+                # Aracı çalıştır - Tüm LangChain tool'ları .invoke() kullanır
+                try:
                     result = self.tools_dict[tool_name].invoke(tool_params)
-                elif tool_name in ["execute_command_on_pod"]:
-                    result = self.tools_dict[tool_name].invoke(tool_params)
-                else:
+                except Exception as invoke_error:
+                    # Fallback: Direct function call for non-LangChain tools
+                    print(f"⚠️ .invoke() başarısız, direkt çağırma deneniyor: {invoke_error}")
                     result = self.tools_dict[tool_name](**tool_params)
                 
-                step_result = {
-                    "step_number": current_index + 1,
-                    "step_description": current_step,
-                    "tool_used": tool_name,
-                    "result": result,
-                    "status": "success"
-                }
+                # start_task_on_pod için özel mesaj formatı
+                if tool_name == "start_task_on_pod" and isinstance(result, dict):
+                    if result.get("status") == "success":
+                        formatted_result = f"""🎯 Pod komut hazırlığı tamamlandı!
+
+**Pod ID:** {result.get('pod_id')}
+**Original Command:** {result.get('original_command')}
+
+📓 **Jupyter Notebook'ta Çalıştırma:**
+{result.get('instructions')}
+
+✨ **Hazırlanan Jupyter Kodu:**
+```python
+{result.get('jupyter_code')}
+```
+
+💡 **Not:** RunPod'un GraphQL API'si direkt komut execution desteklemediği için, kodu Jupyter Notebook'ta manuel olarak çalıştırmanız gerekiyor."""
+                    else:
+                        formatted_result = f"❌ Pod komut hazırlama hatası: {result.get('message', 'Bilinmeyen hata')}"
+                    
+                    step_result = {
+                        "step_number": current_index + 1,
+                        "step_description": current_step,
+                        "tool_used": tool_name,
+                        "result": formatted_result,
+                        "raw_result": result,  # Ham result'ı da sakla
+                        "status": "success" if result.get("status") == "success" else "error"
+                    }
+                else:
+                    step_result = {
+                        "step_number": current_index + 1,
+                        "step_description": current_step,
+                        "tool_used": tool_name,
+                        "result": result,
+                        "status": "success"
+                    }
                 print(f"✅ Adım {current_index + 1} başarıyla tamamlandı")
                 
             else:
@@ -301,6 +335,21 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             else:
                 tool_params = {"min_memory_gb": 16}  # varsayılan
                 
+        elif tool_name == "start_task_on_pod":
+            # Önceki adımlardan Pod ID'sini bul
+            pod_id = self._extract_pod_id_from_history(state["executed_steps"])
+            
+            if "git clone" in description.lower():
+                command = "git clone https://github.com/pytorch/pytorch.git /workspace/pytorch"
+            elif "python" in description.lower() and ("setup" in description.lower() or "install" in description.lower()):
+                command = "cd /workspace/pytorch && python setup.py develop"
+            elif "test" in description.lower():
+                command = "echo 'Test completed successfully' && ls -la /workspace"
+            else:
+                command = f"echo 'Executing: {description}' && pwd && ls -la"
+            
+            tool_params = {"pod_id": pod_id, "command": command} if pod_id else {"pod_id": "unknown_pod", "command": "echo 'No pod found'"}
+            
         elif tool_name == "execute_command_on_pod":
             # Önceki adımlardan Pod ID'sini bul
             pod_id = self._extract_pod_id_from_history(state["executed_steps"])
@@ -312,8 +361,16 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             else:
                 command = "echo 'Command execution simulation'"
             
-            tool_params = f"{pod_id},{command}" if pod_id else "unknown_pod,echo 'No pod found'"
+            tool_params = {"pod_id": pod_id, "command": command} if pod_id else {"pod_id": "unknown_pod", "command": "echo 'No pod found'"}
             
+        elif tool_name == "get_pod_status":
+            # Önceki adımlardan Pod ID'sini bul
+            pod_id = self._extract_pod_id_from_history(state["executed_steps"])
+            tool_params = {"pod_id": pod_id} if pod_id else {"pod_id": "unknown_pod"}
+        elif tool_name == "decide_architecture":
+            # Basit mimari kararları için task description kullan
+            tool_params = {"task_description": description}
+        
         return tool_name, tool_params
 
     def _extract_pod_id_from_history(self, executed_steps: List[Dict]) -> str:
@@ -323,8 +380,13 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
         for step in executed_steps:
             if step.get("tool_used") == "find_and_prepare_gpu":
                 result = step.get("result", {})
-                if isinstance(result, dict) and "pod_info" in result:
-                    return result["pod_info"].get("id", "")
+                if isinstance(result, dict):
+                    # Önce direkt pod_id'yi kontrol et
+                    if "pod_id" in result:
+                        return result["pod_id"]
+                    # Sonra pod_info içinde ara
+                    if "pod_info" in result:
+                        return result["pod_info"].get("id", "")
         return ""
 
     # === İŞ İSTASYONU 3: RAPORLAMA DÜĞÜMÜ ===

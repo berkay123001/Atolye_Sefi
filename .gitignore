@@ -36,3 +36,6 @@ wandb/
 *.db
 *.sqlite
 *.sqlite3
+
+# Proje Vizyonu (Gizli)
+PROJECT_VISION.md
