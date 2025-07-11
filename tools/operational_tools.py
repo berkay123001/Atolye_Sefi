@@ -282,14 +282,42 @@ class StartTaskInput(BaseModel):
 @tool(args_schema=StartTaskInput)
 def start_task_on_pod(pod_id: str, command: str) -> Dict[str, Any]:
     """
-    Pod'da komut çalıştırma simülasyonu yapar ve Jupyter URL'ini sağlar.
-    RunPod'un GraphQL API'si direkt komut çalıştırmayı desteklemediği için,
-    kullanıcının manuel olarak Jupyter Notebook'a gidip kodu çalıştırması önerilir.
+    Pod'da SSH otomasyonu ile gerçek komut çalıştırır.
+    Önce SSH ile dener, başarısız olursa Jupyter Notebook ile manuel çalıştırma önerir.
     """
-    print(f"\n[Command Executor] Pod '{pod_id}' için komut hazırlanıyor...")
-    print(f"[Command Executor] Komut: {command}")
+    print(f"\n[SSH Command Executor] Pod '{pod_id}' için komut çalıştırılıyor...")
+    print(f"[SSH Command Executor] Komut: {command}")
     
-    # Jupyter URL'ini oluştur
+    try:
+        # SSH otomasyonu ile gerçek komut çalıştırmayı dene
+        from tools.ssh_pod_tools import execute_ssh_command
+        
+        print("[SSH Command Executor] SSH ile komut çalıştırılıyor...")
+        ssh_result = execute_ssh_command(pod_id, command)
+        
+        if ssh_result.get("status") == "success":
+            print("[SSH Command Executor] ✅ SSH komutu başarıyla çalıştırıldı!")
+            return {
+                "status": "success",
+                "message": f"Komut SSH ile başarıyla çalıştırıldı: {command}",
+                "pod_id": pod_id,
+                "command": command,
+                "output": ssh_result.get("output", ""),
+                "error": ssh_result.get("error", ""),
+                "exit_code": ssh_result.get("exit_code", 0),
+                "execution_method": "SSH Automation",
+                "ssh_method": ssh_result.get("method_used", "")
+            }
+        else:
+            print(f"[SSH Command Executor] ❌ SSH hatası: {ssh_result.get('message', '')}")
+            # SSH başarısız, Jupyter fallback
+            print("[SSH Command Executor] SSH başarısız, Jupyter Notebook kullanımı öneriliyor...")
+    
+    except Exception as e:
+        print(f"[SSH Command Executor] ❌ SSH modülü hatası: {str(e)}")
+        print("[SSH Command Executor] Jupyter Notebook kullanımı öneriliyor...")
+    
+    # SSH başarısız olursa, Jupyter Notebook için kod hazırla
     jupyter_url = f"https://{pod_id}-8888.proxy.runpod.net/lab/"
     
     # Komutu Jupyter Notebook için uygun hale getir
