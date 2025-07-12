@@ -53,11 +53,27 @@ class GraphAgent:
             "start_task_on_pod": start_task_on_pod,  # Jupyter notebook komut hazırlama
             "execute_command_on_pod": execute_command_on_pod,  # Eski versiyon (fallback)
             "get_pod_status": get_pod_status,
+            # SSH araçlarını ekle
+            "execute_ssh_command": self._execute_ssh_command_wrapper,
         }
         
         # Grafiği oluştur
         self.graph = self.build_graph()
         print("🧠 GraphAgent: Çok adımlı hafıza sistemi aktif!")
+
+    def _execute_ssh_command_wrapper(self, **kwargs) -> Dict:
+        """SSH komut çalıştırma wrapper'ı."""
+        try:
+            from tools.ssh_pod_tools import execute_ssh_command
+            pod_id = kwargs.get("pod_id", "")
+            command = kwargs.get("command", "")
+            
+            if not pod_id or not command:
+                return {"status": "error", "message": "Pod ID ve komut gerekli"}
+            
+            return execute_ssh_command(pod_id, command)
+        except Exception as e:
+            return {"status": "error", "message": f"SSH hatası: {str(e)}"}
 
     def _simulate_task_execution(self, **kwargs) -> Dict:
         """
@@ -167,17 +183,20 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             - find_and_prepare_gpu: GPU ortamı bulmak ve hazırlamak için  
             - start_task_on_pod: Pod'da Jupyter Notebook için komut hazırlar (Manuel execution gerekir)
             - execute_command_on_pod: Pod'da komut çalıştırmak için (eski versiyon)
+            - execute_ssh_command: Pod'da SSH ile direkt komut çalıştırmak için (YENİ VE TERCİHLİ!)
             - get_pod_status: Pod durumunu kontrol etmek için
+
+            ÖNEMLİ: SSH komutları için "execute_ssh_command" kullan! Bu direkt çalışır.
 
             Planı, her satırda bir adım olacak şekilde, şu formatta yaz:
             1. [ARAÇ_ADI] açıklama
             2. [ARAÇ_ADI] açıklama
             ...
 
-            Örnek:
-            1. [find_and_prepare_gpu] 16GB VRAM'li GPU ortamı bul ve hazırla
-            2. [start_task_on_pod] Git repository'sini clone et
-            3. [start_task_on_pod] Gerekli kütüphaneleri yükle"""),
+            Örnek SSH kullanımı:
+            1. [execute_ssh_command] whoami komutunu çalıştır
+            2. [execute_ssh_command] Python dosyası oluştur ve çalıştır
+            3. [execute_ssh_command] nvidia-smi ile GPU bilgilerini al"""),
             ("user", "Görev: {task}")
         ])
         
@@ -326,6 +345,10 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
         # Parametreleri akıllıca belirle
         tool_params = {}
         
+        # Eğer user input'ta pod ID varsa onu kullan
+        user_input = state.get("input", "")
+        pod_id_from_input = self._extract_pod_id_from_input(user_input)
+        
         if tool_name == "find_and_prepare_gpu":
             # VRAM miktarını metinden çıkar
             if "16GB" in description or "16 GB" in description:
@@ -335,9 +358,42 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             else:
                 tool_params = {"min_memory_gb": 16}  # varsayılan
                 
+        elif tool_name == "execute_ssh_command":
+            # SSH komutu için direkt pod ID kullan
+            if "whoami" in description.lower():
+                command = "whoami"
+            elif "pwd" in description.lower():
+                command = "pwd"
+            elif "python --version" in description.lower() or "python version" in description.lower():
+                command = "python --version"
+            elif "nvidia-smi" in description.lower():
+                command = "nvidia-smi"
+            elif "hello.py" in description.lower() and ("create" in description.lower() or "touch" in description.lower() or "echo" in description.lower()):
+                command = 'cat > hello.py << "EOF"\nprint("Hello from GraphAgent SSH!")\nprint("Automation working perfectly!")\nEOF'
+            elif "hello.py" in description.lower() and ("run" in description.lower() or "python hello.py" in description.lower()):
+                command = "python hello.py"
+            elif "test.py" in description.lower() and ("create" in description.lower() or "touch" in description.lower()):
+                command = 'cat > test.py << "EOF"\nprint("GraphAgent SSH Test!")\nprint("Pod automation successful!")\nEOF'
+            elif "test.py" in description.lower() and ("run" in description.lower() or "python test.py" in description.lower()):
+                command = "python test.py"
+            elif "ls" in description.lower():
+                command = "ls -la"
+            elif "cat" in description.lower() and any(f in description.lower() for f in [".py", "hello", "test"]):
+                command = "cat *.py"
+            else:
+                # Fallback: description'dan komut çıkarmaya çalış
+                if "komutunu çalıştır" in description.lower():
+                    # "python --version komutunu çalıştır" -> "python --version"
+                    command_part = description.lower().replace("komutunu çalıştır", "").strip()
+                    command = command_part
+                else:
+                    command = "echo 'Command not parsed correctly'"
+            
+            tool_params = {"pod_id": pod_id_from_input, "command": command}
+                
         elif tool_name == "start_task_on_pod":
             # Önceki adımlardan Pod ID'sini bul
-            pod_id = self._extract_pod_id_from_history(state["executed_steps"])
+            pod_id = pod_id_from_input or self._extract_pod_id_from_history(state["executed_steps"])
             
             if "git clone" in description.lower():
                 command = "git clone https://github.com/pytorch/pytorch.git /workspace/pytorch"
@@ -352,9 +408,21 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             
         elif tool_name == "execute_command_on_pod":
             # Önceki adımlardan Pod ID'sini bul
-            pod_id = self._extract_pod_id_from_history(state["executed_steps"])
+            pod_id = pod_id_from_input or self._extract_pod_id_from_history(state["executed_steps"])
             
-            if "git clone" in description.lower():
+            if "whoami" in description.lower():
+                command = "whoami"
+            elif "pwd" in description.lower():
+                command = "pwd"
+            elif "python --version" in description.lower():
+                command = "python --version"
+            elif "nvidia-smi" in description.lower():
+                command = "nvidia-smi"
+            elif "test.py" in description.lower() and "create" in description.lower():
+                command = 'echo "print(\\"Hello World!\\")" > test.py'
+            elif "test.py" in description.lower() and "run" in description.lower():
+                command = "python test.py"
+            elif "git clone" in description.lower():
                 command = "git clone https://github.com/pytorch/pytorch.git"
             elif "python" in description.lower() and "main" in description.lower():
                 command = "cd pytorch && python setup.py install"
@@ -365,13 +433,24 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             
         elif tool_name == "get_pod_status":
             # Önceki adımlardan Pod ID'sini bul
-            pod_id = self._extract_pod_id_from_history(state["executed_steps"])
+            pod_id = pod_id_from_input or self._extract_pod_id_from_history(state["executed_steps"])
             tool_params = {"pod_id": pod_id} if pod_id else {"pod_id": "unknown_pod"}
         elif tool_name == "decide_architecture":
             # Basit mimari kararları için task description kullan
             tool_params = {"task_description": description}
         
         return tool_name, tool_params
+
+    def _extract_pod_id_from_input(self, user_input: str) -> str:
+        """
+        User input'tan pod ID'sini çıkarır.
+        """
+        import re
+        # d7yy27cjkpt2r5 gibi pattern ara
+        match = re.search(r'\b[a-z0-9]{14}\b', user_input)
+        if match:
+            return match.group()
+        return ""
 
     def _extract_pod_id_from_history(self, executed_steps: List[Dict]) -> str:
         """
@@ -519,6 +598,12 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             "intermediate_steps": final_state.get("executed_steps", []),
             "plan": final_state.get("plan", [])
         }
+
+
+# === FACTORY FUNCTION ===
+def create_graph_agent():
+    """GraphAgent instance oluşturur."""
+    return GraphAgent()
 
 
 # --- Test Bloğu ---

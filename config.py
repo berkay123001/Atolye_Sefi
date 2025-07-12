@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # YENİ EKLENDİ: RunPod API'sine erişim için gerekli anahtar.
     RUNPOD_API_KEY: str
     
+    # SSH anahtarı yolu
+    RUNPOD_SSH_KEY: str = "/home/berkayhsrt/.ssh/id_ed25519"
+    
     # 🚨 GÜVENLİK AYARI: RunPod simulation mode
     RUNPOD_SIMULATION_MODE: str = "true"
 
