@@ -167,36 +167,37 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             print(f"❌ Sohbet hatası: {e}")
             return {"final_result": "Üzgünüm, şu anda bir sorun yaşıyorum. Tekrar dener misin?"}
 
-    # === İŞ İSTASYONU 2: PLANLAMA DÜĞÜMÜ ===
+    # === İŞ İSTASYONU 2: YENİ PLANLAMA DÜĞÜMÜ ===
     def plan_step(self, state: AgentState) -> Dict:
         """
-        Kullanıcının görevini analiz eder ve adım adım plan oluşturur.
+        Kullanıcının görevini analiz eder ve her biri tek bir bash komutu olan adımlar oluşturur.
         """
-        print("\n🎯 [PLANLAMA DÜĞÜMÜ] Görev analiz ediliyor ve plan oluşturuluyor...")
+        print("\n🎯 [PLANLAMA DÜĞÜMÜ] Görev bash komutlarına dönüştürülüyor...")
         
         planning_prompt = ChatPromptTemplate.from_messages([
-            ("system", """Sen bir MLOps proje yöneticisisin. Kullanıcının görevini analiz et ve 
-            adım adım bir plan oluştur. Her adım, hangi aracın çağrılacağını net olarak belirtmeli.
+            ("system", """Sen, bir DevOps otomasyon uzmanısın. Sana verilen görevi, uzak bir sunucuda, 
+            bash terminalinde çalıştırılacak, TEKİL VE SIRALI KOMUTLARIN bir listesine dönüştür.
+
+            KURALLAR:
+            - Her adım, SADECE TEK BİR KOMUT içermelidir
+            - Karmaşık && zincirleri KURMA 
+            - Her komutu AYRI BİR ADIM olarak yaz
+            - Plan, doğrudan bir betik gibi çalıştırılabilir olmalı
 
             Kullanılabilir araçlar:
-            - decide_architecture: Mimari kararları almak için
-            - find_and_prepare_gpu: GPU ortamı bulmak ve hazırlamak için  
-            - start_task_on_pod: Pod'da Jupyter Notebook için komut hazırlar (Manuel execution gerekir)
-            - execute_command_on_pod: Pod'da komut çalıştırmak için (eski versiyon)
-            - execute_ssh_command: Pod'da SSH ile direkt komut çalıştırmak için (YENİ VE TERCİHLİ!)
+            - find_and_prepare_gpu: Yeni pod oluşturmak için
+            - execute_ssh_command: Tek bash komutu çalıştırmak için
             - get_pod_status: Pod durumunu kontrol etmek için
 
-            ÖNEMLİ: SSH komutları için "execute_ssh_command" kullan! Bu direkt çalışır.
+            Format:
+            1. [execute_ssh_command] pwd
+            2. [execute_ssh_command] ls -la
+            3. [execute_ssh_command] mkdir /workspace/proje
+            4. [execute_ssh_command] cd /workspace/proje
+            5. [execute_ssh_command] echo "print('hello')" > test.py
+            6. [execute_ssh_command] python test.py
 
-            Planı, her satırda bir adım olacak şekilde, şu formatta yaz:
-            1. [ARAÇ_ADI] açıklama
-            2. [ARAÇ_ADI] açıklama
-            ...
-
-            Örnek SSH kullanımı:
-            1. [execute_ssh_command] whoami komutunu çalıştır
-            2. [execute_ssh_command] Python dosyası oluştur ve çalıştır
-            3. [execute_ssh_command] nvidia-smi ile GPU bilgilerini al"""),
+            ÖNEMLİ: Her komut ayrı satır, tek işlem, bash uyumlu!"""),
             ("user", "Görev: {task}")
         ])
         
@@ -230,10 +231,11 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
                 "final_result": f"Planlama hatası: {str(e)}"
             }
 
-    # === İŞ İSTASYONU 2: İCRA DÜĞÜMÜ ===
+    # === İŞ İSTASYONU 3: YENİ İCRA DÜĞÜMÜ ===
     def execute_step(self, state: AgentState) -> Dict:
         """
-        Plandaki sıradaki adımı analiz eder ve ilgili aracı çalıştırır.
+        Plandaki sıradaki bash komutunu analiz eder ve çalıştırır.
+        Her adım tek bir bash komutu içerir.
         """
         current_index = state["current_step_index"]
         plan = state["plan"]
@@ -246,68 +248,60 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
         print(f"\n⚡ [İCRA DÜĞÜMÜ] Adım {current_index + 1}/{len(plan)}: {current_step}")
         
         try:
-            # Adımdan araç adını ve parametreleri çıkar
-            tool_name, tool_params = self._parse_step(current_step, state)
+            # 1. Sıradaki komutu al ve ayrıştır
+            tool_name, bash_command = self._parse_bash_command(current_step, state)
             
+            # 2. Doğru aracı çağır
             if tool_name in self.tools_dict:
                 print(f"🔧 Araç '{tool_name}' çalıştırılıyor...")
+                print(f"📋 Bash komutu: {bash_command}")
                 
-                # Aracı çalıştır - Tüm LangChain tool'ları .invoke() kullanır
+                # Pod ID'sini önceki adımlardan al
+                pod_id = self._extract_pod_id_from_context(state)
+                
+                # Parametreleri hazırla
+                if tool_name == "execute_ssh_command":
+                    tool_params = {"pod_id": pod_id, "command": bash_command}
+                elif tool_name == "find_and_prepare_gpu":
+                    tool_params = {"min_memory_gb": 16}  # default
+                elif tool_name == "get_pod_status":
+                    tool_params = {"pod_id": pod_id}
+                else:
+                    tool_params = {}
+                
+                # Aracı çalıştır
                 try:
                     result = self.tools_dict[tool_name].invoke(tool_params)
-                except Exception as invoke_error:
-                    # Fallback: Direct function call for non-LangChain tools
-                    print(f"⚠️ .invoke() başarısız, direkt çağırma deneniyor: {invoke_error}")
+                except:
+                    # Fallback: Direct function call
                     result = self.tools_dict[tool_name](**tool_params)
                 
-                # start_task_on_pod için özel mesaj formatı
-                if tool_name == "start_task_on_pod" and isinstance(result, dict):
-                    if result.get("status") == "success":
-                        formatted_result = f"""🎯 Pod komut hazırlığı tamamlandı!
-
-**Pod ID:** {result.get('pod_id')}
-**Original Command:** {result.get('original_command')}
-
-📓 **Jupyter Notebook'ta Çalıştırma:**
-{result.get('instructions')}
-
-✨ **Hazırlanan Jupyter Kodu:**
-```python
-{result.get('jupyter_code')}
-```
-
-💡 **Not:** RunPod'un GraphQL API'si direkt komut execution desteklemediği için, kodu Jupyter Notebook'ta manuel olarak çalıştırmanız gerekiyor."""
-                    else:
-                        formatted_result = f"❌ Pod komut hazırlama hatası: {result.get('message', 'Bilinmeyen hata')}"
-                    
-                    step_result = {
-                        "step_number": current_index + 1,
-                        "step_description": current_step,
-                        "tool_used": tool_name,
-                        "result": formatted_result,
-                        "raw_result": result,  # Ham result'ı da sakla
-                        "status": "success" if result.get("status") == "success" else "error"
-                    }
-                else:
-                    step_result = {
-                        "step_number": current_index + 1,
-                        "step_description": current_step,
-                        "tool_used": tool_name,
-                        "result": result,
-                        "status": "success"
-                    }
-                print(f"✅ Adım {current_index + 1} başarıyla tamamlandı")
+                # 3. Sonucu kaydet
+                step_result = {
+                    "step_number": current_index + 1,
+                    "step_description": current_step,
+                    "tool_used": tool_name,
+                    "bash_command": bash_command,
+                    "result": result,
+                    "status": "success" if result.get("status") == "success" else "error"
+                }
+                
+                print(f"✅ Adım {current_index + 1} tamamlandı!")
+                if result.get("output"):
+                    print(f"📤 Çıktı: {result.get('output', '')[:100]}...")
                 
             else:
                 step_result = {
                     "step_number": current_index + 1,
                     "step_description": current_step,
                     "tool_used": tool_name,
+                    "bash_command": bash_command,
                     "result": f"Bilinmeyen araç: {tool_name}",
                     "status": "error"
                 }
                 print(f"❌ Bilinmeyen araç: {tool_name}")
             
+            # 4. Bir sonraki adıma geç
             return {
                 "executed_steps": [step_result],
                 "current_step_index": current_index + 1
@@ -327,130 +321,46 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
                 "current_step_index": current_index + 1
             }
 
-    def _parse_step(self, step: str, state: AgentState) -> tuple:
+    def _parse_bash_command(self, step: str, state: AgentState) -> tuple:
         """
-        Adım metninden araç adını ve parametreleri çıkarır.
+        Adım metninden araç adını ve bash komutunu çıkarır.
+        Format: "[tool_name] bash_command"
         """
         # [ARAÇ_ADI] formatını ara
         if '[' in step and ']' in step:
             start = step.index('[') + 1
             end = step.index(']')
             tool_name = step[start:end]
-            description = step[end+1:].strip()
+            bash_command = step[end+1:].strip()
         else:
             # Fallback
-            tool_name = "decide_architecture"
-            description = step
+            tool_name = "execute_ssh_command"
+            bash_command = step.strip()
         
-        # Parametreleri akıllıca belirle
-        tool_params = {}
-        
-        # Eğer user input'ta pod ID varsa onu kullan
-        user_input = state.get("input", "")
-        pod_id_from_input = self._extract_pod_id_from_input(user_input)
-        
-        if tool_name == "find_and_prepare_gpu":
-            # VRAM miktarını metinden çıkar
-            if "16GB" in description or "16 GB" in description:
-                tool_params = {"min_memory_gb": 16}
-            elif "32GB" in description or "32 GB" in description:
-                tool_params = {"min_memory_gb": 32}
-            else:
-                tool_params = {"min_memory_gb": 16}  # varsayılan
-                
-        elif tool_name == "execute_ssh_command":
-            # SSH komutu için direkt pod ID kullan
-            if "whoami" in description.lower():
-                command = "whoami"
-            elif "pwd" in description.lower():
-                command = "pwd"
-            elif "python --version" in description.lower() or "python version" in description.lower():
-                command = "python --version"
-            elif "nvidia-smi" in description.lower():
-                command = "nvidia-smi"
-            elif "hello.py" in description.lower() and ("create" in description.lower() or "touch" in description.lower() or "echo" in description.lower()):
-                command = 'cat > hello.py << "EOF"\nprint("Hello from GraphAgent SSH!")\nprint("Automation working perfectly!")\nEOF'
-            elif "hello.py" in description.lower() and ("run" in description.lower() or "python hello.py" in description.lower()):
-                command = "python hello.py"
-            elif "test.py" in description.lower() and ("create" in description.lower() or "touch" in description.lower()):
-                command = 'cat > test.py << "EOF"\nprint("GraphAgent SSH Test!")\nprint("Pod automation successful!")\nEOF'
-            elif "test.py" in description.lower() and ("run" in description.lower() or "python test.py" in description.lower()):
-                command = "python test.py"
-            elif "ls" in description.lower():
-                command = "ls -la"
-            elif "cat" in description.lower() and any(f in description.lower() for f in [".py", "hello", "test"]):
-                command = "cat *.py"
-            else:
-                # Fallback: description'dan komut çıkarmaya çalış
-                if "komutunu çalıştır" in description.lower():
-                    # "python --version komutunu çalıştır" -> "python --version"
-                    command_part = description.lower().replace("komutunu çalıştır", "").strip()
-                    command = command_part
-                else:
-                    command = "echo 'Command not parsed correctly'"
-            
-            tool_params = {"pod_id": pod_id_from_input, "command": command}
-                
-        elif tool_name == "start_task_on_pod":
-            # Önceki adımlardan Pod ID'sini bul
-            pod_id = pod_id_from_input or self._extract_pod_id_from_history(state["executed_steps"])
-            
-            if "git clone" in description.lower():
-                command = "git clone https://github.com/pytorch/pytorch.git /workspace/pytorch"
-            elif "python" in description.lower() and ("setup" in description.lower() or "install" in description.lower()):
-                command = "cd /workspace/pytorch && python setup.py develop"
-            elif "test" in description.lower():
-                command = "echo 'Test completed successfully' && ls -la /workspace"
-            else:
-                command = f"echo 'Executing: {description}' && pwd && ls -la"
-            
-            tool_params = {"pod_id": pod_id, "command": command} if pod_id else {"pod_id": "unknown_pod", "command": "echo 'No pod found'"}
-            
-        elif tool_name == "execute_command_on_pod":
-            # Önceki adımlardan Pod ID'sini bul
-            pod_id = pod_id_from_input or self._extract_pod_id_from_history(state["executed_steps"])
-            
-            if "whoami" in description.lower():
-                command = "whoami"
-            elif "pwd" in description.lower():
-                command = "pwd"
-            elif "python --version" in description.lower():
-                command = "python --version"
-            elif "nvidia-smi" in description.lower():
-                command = "nvidia-smi"
-            elif "test.py" in description.lower() and "create" in description.lower():
-                command = 'echo "print(\\"Hello World!\\")" > test.py'
-            elif "test.py" in description.lower() and "run" in description.lower():
-                command = "python test.py"
-            elif "git clone" in description.lower():
-                command = "git clone https://github.com/pytorch/pytorch.git"
-            elif "python" in description.lower() and "main" in description.lower():
-                command = "cd pytorch && python setup.py install"
-            else:
-                command = "echo 'Command execution simulation'"
-            
-            tool_params = {"pod_id": pod_id, "command": command} if pod_id else {"pod_id": "unknown_pod", "command": "echo 'No pod found'"}
-            
-        elif tool_name == "get_pod_status":
-            # Önceki adımlardan Pod ID'sini bul
-            pod_id = pod_id_from_input or self._extract_pod_id_from_history(state["executed_steps"])
-            tool_params = {"pod_id": pod_id} if pod_id else {"pod_id": "unknown_pod"}
-        elif tool_name == "decide_architecture":
-            # Basit mimari kararları için task description kullan
-            tool_params = {"task_description": description}
-        
-        return tool_name, tool_params
+        return tool_name, bash_command
 
-    def _extract_pod_id_from_input(self, user_input: str) -> str:
+    def _extract_pod_id_from_context(self, state: AgentState) -> str:
         """
-        User input'tan pod ID'sini çıkarır.
+        User input'tan veya önceki adımlardan pod ID'sini çıkarır.
         """
+        # Önce user input'tan ara
+        user_input = state.get("input", "")
         import re
-        # d7yy27cjkpt2r5 gibi pattern ara
         match = re.search(r'\b[a-z0-9]{14}\b', user_input)
         if match:
             return match.group()
-        return ""
+        
+        # Sonra executed_steps'ten ara
+        for step in state.get("executed_steps", []):
+            if step.get("tool_used") == "find_and_prepare_gpu":
+                result = step.get("result", {})
+                if isinstance(result, dict):
+                    if "pod_id" in result:
+                        return result["pod_id"]
+                    if "pod_info" in result:
+                        return result["pod_info"].get("id", "")
+        
+        return "unknown_pod"
 
     def _extract_pod_id_from_history(self, executed_steps: List[Dict]) -> str:
         """
