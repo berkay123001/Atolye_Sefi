@@ -9,8 +9,11 @@ import re
 from typing import Dict, List, Any
 from pydantic.v1 import BaseModel, Field
 
-# LangChain araçları için gerekli importlar
+# LangChain araçları için gerekli importları
 from langchain.tools import tool
+
+# Modal executor import
+from tools.modal_executor import modal_executor
 
 try:
     from config import settings
@@ -19,6 +22,213 @@ except ImportError:
     sys.exit(1)
 
 # --- Yardımcı Fonksiyonlar ---
+
+def _detect_gpu_requirement(command: str) -> bool:
+    """Komutun GPU gerektirip gerektirmediğini tespit eder."""
+    gpu_keywords = [
+        "torch", "tensorflow", "cuda", "gpu", "model.train", "model.fit", 
+        "neural", "deep", "ml", "train", "inference", "transformers"
+    ]
+    return any(keyword in command.lower() for keyword in gpu_keywords)
+
+def _extract_requirements(command: str) -> list:
+    """Komuttan gerekli paketleri çıkarır."""
+    requirements = []
+    
+    # pip install komutlarını tespit et
+    if "pip install" in command:
+        parts = command.split("pip install")
+        for part in parts[1:]:
+            packages = part.strip().split()
+            requirements.extend([pkg for pkg in packages if not pkg.startswith('-')])
+    
+    # import ifadelerini tespit et
+    import_patterns = re.findall(r'import\s+(\w+)', command)
+    requirements.extend(import_patterns)
+    
+    return list(set(requirements))
+
+def _convert_command_to_jupyter(command: str) -> str:
+    """Komutları Jupyter Notebook için uygun Python koduna çevirir."""
+    
+    # Echo komutları (dosya yazma dahil)
+    if command.startswith("echo"):
+        if ">" in command:
+            # Dosya yazma operasyonu - akıllı parsing
+            try:
+                from tools.advanced_code_writer import detect_code_writing_command
+                code_info = detect_code_writing_command(command)
+                
+                if code_info:
+                    content = code_info['content']
+                    filename = code_info['file_path']
+                    
+                    # İçeriği Python string olarak düzgün escape et
+                    escaped_content = content.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+                    
+                    return f'''# Dosya oluşturma (Smart Code Writer fallback)
+import os
+
+# Klasör yapısını oluştur
+os.makedirs(os.path.dirname("{filename}") if os.path.dirname("{filename}") else ".", exist_ok=True)
+
+# Dosyayı yaz
+with open("{filename}", "w") as f:
+    f.write("""{content}""")
+
+print("✅ Dosya '{filename}' başarıyla oluşturuldu!")
+print(f"📊 Dosya boyutu: {{len("""{content}""")}} karakter")
+
+# Dosyayı doğrula
+if os.path.exists("{filename}"):
+    with open("{filename}", "r") as f:
+        content_check = f.read()
+    print("🔍 Dosya içeriği doğrulandı ✅")
+    print("--- Dosya İçeriği ---")
+    print(content_check[:200] + "..." if len(content_check) > 200 else content_check)
+else:
+    print("❌ Dosya oluşturulamadı!")'''
+                
+            except Exception as e:
+                print(f"⚠️ Akıllı parsing hatası: {e}")
+            
+            # Fallback basit parsing
+            parts = command.split(" > ", 1)
+            if len(parts) == 2:
+                content = parts[0].replace("echo", "", 1).strip().strip('"').strip("'")
+                filename = parts[1].strip()
+                return f'''# Dosya oluşturma (basit)
+with open("{filename}", "w") as f:
+    f.write("{content}")
+print("Dosya '{filename}' oluşturuldu!")'''
+        else:
+            # Basit echo
+            content = command.replace("echo", "", 1).strip().strip('"').strip("'")
+            return f'print("{content}")'
+    
+    # Git komutları
+    elif command.startswith("git"):
+        return f'''# Git komutu
+import subprocess
+import os
+
+print("🔧 Git komutu çalıştırılıyor: {command}")
+result = subprocess.run("{command}", shell=True, capture_output=True, text=True, cwd="/workspace")
+
+print("📤 STDOUT:")
+print(result.stdout)
+
+if result.stderr:
+    print("⚠️ STDERR:")
+    print(result.stderr)
+
+print(f"📊 Return code: {{result.returncode}}")
+
+if result.returncode == 0:
+    print("✅ Git komutu başarılı!")
+else:
+    print("❌ Git komutu başarısız!")'''
+    
+    # Pip/conda kurulum komutları
+    elif command.startswith(("pip install", "conda install")):
+        return f'''# Paket kurulumu
+import subprocess
+import sys
+
+print("📦 Paket kurulumu başlıyor: {command}")
+result = subprocess.run("{command}", shell=True, capture_output=True, text=True)
+
+print("📤 STDOUT:")
+print(result.stdout)
+
+if result.stderr:
+    print("⚠️ STDERR:")
+    print(result.stderr)
+
+print(f"📊 Return code: {{result.returncode}}")
+
+if result.returncode == 0:
+    print("✅ Paket kurulumu başarılı!")
+    # Kurulu paketleri listele
+    try:
+        import pkg_resources
+        installed_packages = [d.project_name for d in pkg_resources.working_set]
+        print(f"📋 Toplam kurulu paket sayısı: {{len(installed_packages)}}")
+    except:
+        pass
+else:
+    print("❌ Paket kurulumu başarısız!")'''
+    
+    # Python script çalıştırma
+    elif command.startswith("python"):
+        return f'''# Python script çalıştırma
+import subprocess
+import os
+
+print("🐍 Python script çalıştırılıyor: {command}")
+result = subprocess.run("{command}", shell=True, capture_output=True, text=True, cwd="/workspace")
+
+print("📤 STDOUT:")
+print(result.stdout)
+
+if result.stderr:
+    print("⚠️ STDERR:")
+    print(result.stderr)
+
+print(f"📊 Return code: {{result.returncode}}")'''
+    
+    # Dosya/klasör işlemleri
+    elif command.startswith(("mkdir", "ls", "cat", "cp", "mv", "rm")):
+        return f'''# Dosya sistemi komutu
+import subprocess
+import os
+
+print("📁 Dosya sistemi komutu: {command}")
+result = subprocess.run("{command}", shell=True, capture_output=True, text=True, cwd="/workspace")
+
+print("📤 STDOUT:")
+print(result.stdout)
+
+if result.stderr:
+    print("⚠️ STDERR:")
+    print(result.stderr)
+
+print(f"📊 Return code: {{result.returncode}}")
+
+# Çalışma dizinindeki dosyaları göster
+try:
+    print("\\n📋 Güncel çalışma dizini:")
+    print(os.getcwd())
+    print("📋 Dizin içeriği:")
+    for item in os.listdir("/workspace")[:10]:  # İlk 10 öğe
+        print(f"  - {{item}}")
+except:
+    pass'''
+    
+    # Genel komutlar için
+    else:
+        return f'''# Genel komut çalıştırma
+import subprocess
+import os
+
+print("⚙️ Komut çalıştırılıyor: {command}")
+result = subprocess.run("{command}", shell=True, capture_output=True, text=True, cwd="/workspace")
+
+print("📤 STDOUT:")
+print(result.stdout)
+
+if result.stderr:
+    print("⚠️ STDERR:")
+    print(result.stderr)
+
+print(f"📊 Return code: {{result.returncode}}")
+
+if result.returncode == 0:
+    print("✅ Komut başarılı!")
+else:
+    print("❌ Komut başarısız!")'''
+
+
 def _run_graphql_query(query: str, variables: Dict = None) -> Dict:
     """GraphQL sorgusu çalıştırmak için yardımcı fonksiyon."""
     api_url = "https://api.runpod.io/graphql"
@@ -261,8 +471,10 @@ def find_and_prepare_gpu(min_memory_gb: Any = 16) -> Dict:
             }
             
             print(f"\n🔗 Jupyter Notebook: {web_terminal_url}")
+            
+            print(f"⚡ Modal.com serverless execution ready!")
+            
             if terminal_info and terminal_info.get("ssh_port"):
-                print(f"🔗 SSH Port: {terminal_info['ssh_port']}")
                 print(f"📊 Pod Bilgileri: {terminal_info['total_ports']} port, {terminal_info['uptime']}s çalışma süresi")
             
             return response
@@ -282,105 +494,71 @@ class StartTaskInput(BaseModel):
 @tool(args_schema=StartTaskInput)
 def start_task_on_pod(pod_id: str, command: str) -> Dict[str, Any]:
     """
-    Pod'da SSH otomasyonu ile gerçek komut çalıştırır.
-    Önce SSH ile dener, başarısız olursa Jupyter Notebook ile manuel çalıştırma önerir.
+    Modal.com serverless ile kod çalıştırır.
+    GPU gereksinimine göre otomatik olarak doğru fonksiyonu seçer.
     """
-    print(f"\n[SSH Command Executor] Pod '{pod_id}' için komut çalıştırılıyor...")
-    print(f"[SSH Command Executor] Komut: {command}")
+    print(f"\n[Modal Executor] Komut çalıştırılıyor...")
+    print(f"[Modal Executor] Komut: {command}")
+    
+    # GPU gereksinimi tespit et
+    use_gpu = _detect_gpu_requirement(command)
+    requirements = _extract_requirements(command)
+    
+    print(f"[Modal Executor] GPU gereksinimi: {'Evet' if use_gpu else 'Hayır'}")
+    if requirements:
+        print(f"[Modal Executor] Ek paketler: {', '.join(requirements)}")
     
     try:
-        # SSH otomasyonu ile gerçek komut çalıştırmayı dene
-        from tools.ssh_pod_tools import execute_ssh_command
+        # Bash komutu mu Python kodu mu?
+        if any(command.strip().startswith(cmd) for cmd in ['ls', 'mkdir', 'cd', 'cp', 'mv', 'rm', 'cat', 'echo', 'wget', 'curl', 'git']):
+            # Bash komutu
+            print("[Modal Executor] Bash komutu tespit edildi")
+            result = modal_executor.execute_bash_command(command)
+        else:
+            # Python kodu
+            print("[Modal Executor] Python kodu tespit edildi")
+            result = modal_executor.execute_python_code(command, use_gpu=use_gpu, requirements=requirements)
         
-        print("[SSH Command Executor] SSH ile komut çalıştırılıyor...")
-        ssh_result = execute_ssh_command(pod_id, command)
-        
-        if ssh_result.get("status") == "success":
-            print("[SSH Command Executor] ✅ SSH komutu başarıyla çalıştırıldı!")
+        if result["status"] == "success":
+            print("[Modal Executor] ✅ Komut başarıyla çalıştırıldı!")
+            
             return {
                 "status": "success",
-                "message": f"Komut SSH ile başarıyla çalıştırıldı: {command}",
-                "pod_id": pod_id,
+                "message": f"Komut Modal.com ile başarıyla çalıştırıldı: {command[:50]}...",
+                "pod_id": "modal-serverless",
                 "command": command,
-                "output": ssh_result.get("output", ""),
-                "error": ssh_result.get("error", ""),
-                "exit_code": ssh_result.get("exit_code", 0),
-                "execution_method": "SSH Automation",
-                "ssh_method": ssh_result.get("method_used", "")
+                "output": result.get("output", ""),
+                "error": result.get("error", ""),
+                "execution_method": f"Modal.com {'GPU' if use_gpu else 'CPU'}",
+                "gpu_used": use_gpu,
+                "requirements_installed": requirements
             }
         else:
-            print(f"[SSH Command Executor] ❌ SSH hatası: {ssh_result.get('message', '')}")
-            # SSH başarısız, Jupyter fallback
-            print("[SSH Command Executor] SSH başarısız, Jupyter Notebook kullanımı öneriliyor...")
-    
+            print(f"[Modal Executor] ❌ Komut hatası: {result.get('error', '')}")
+            
+            return {
+                "status": "error",
+                "message": f"Modal.com execution failed: {result.get('error', 'Unknown error')}",
+                "pod_id": "modal-serverless",
+                "command": command,
+                "output": result.get("output", ""),
+                "error": result.get("error", ""),
+                "execution_method": f"Modal.com {'GPU' if use_gpu else 'CPU'}",
+                "gpu_used": use_gpu
+            }
+            
     except Exception as e:
-        print(f"[SSH Command Executor] ❌ SSH modülü hatası: {str(e)}")
-        print("[SSH Command Executor] Jupyter Notebook kullanımı öneriliyor...")
-    
-    # SSH başarısız olursa, Jupyter Notebook için kod hazırla
-    jupyter_url = f"https://{pod_id}-8888.proxy.runpod.net/lab/"
-    
-    # Komutu Jupyter Notebook için uygun hale getir
-    if command.startswith("echo"):
-        # Echo komutlarını Python print'e çevir
-        if ">" in command:
-            # Dosya yazma operasyonu
-            parts = command.split(" > ")
-            content = parts[0].replace("echo", "").strip().strip('"').strip("'")
-            filename = parts[1].strip()
-            jupyter_code = f'''# Dosya oluşturma
-with open("{filename}", "w") as f:
-    f.write("{content}")
-print("Dosya '{filename}' oluşturuldu!")'''
-        else:
-            # Basit echo
-            content = command.replace("echo", "").strip().strip('"').strip("'")
-            jupyter_code = f'print("{content}")'
-    elif command.startswith("git clone"):
-        # Git clone komutunu çevir
-        jupyter_code = f'''# Git repository klonlama
-import subprocess
-result = subprocess.run("{command}", shell=True, capture_output=True, text=True)
-print("STDOUT:", result.stdout)
-print("STDERR:", result.stderr)
-print("Return code:", result.returncode)'''
-    elif command.startswith("pip install"):
-        # Pip install komutunu çevir
-        packages = command.replace("pip install", "").strip()
-        jupyter_code = f'''# Paket kurulumu
-import subprocess
-result = subprocess.run("pip install {packages}", shell=True, capture_output=True, text=True)
-print("STDOUT:", result.stdout)
-print("STDERR:", result.stderr)
-print("Return code:", result.returncode)'''
-    else:
-        # Diğer komutlar için genel shell execution
-        jupyter_code = f'''# Komut çalıştırma
-import subprocess
-result = subprocess.run("{command}", shell=True, capture_output=True, text=True)
-print("STDOUT:", result.stdout)
-print("STDERR:", result.stderr)
-print("Return code:", result.returncode)'''
-    
-    print(f"[Command Executor] ✅ Jupyter kodu hazırlandı!")
-    print(f"[Command Executor] Jupyter URL: {jupyter_url}")
-    
-    return {
-        "status": "success",
-        "message": "Komut Jupyter Notebook için hazırlandı.",
-        "jupyter_url": jupyter_url,
-        "jupyter_password": "atolye123",
-        "original_command": command,
-        "jupyter_code": jupyter_code,
-        "instructions": f"""Pod'da kodu çalıştırmak için:
-1. Jupyter URL'ini aç: {jupyter_url}
-2. Şifre gir: atolye123
-3. Yeni notebook oluştur veya terminal aç
-4. Aşağıdaki kodu çalıştır:
-
-{jupyter_code}""",
-        "pod_id": pod_id
-    }
+        print(f"[Modal Executor] ❌ Exception: {str(e)}")
+        
+        return {
+            "status": "error", 
+            "message": f"Modal execution exception: {str(e)}",
+            "pod_id": "modal-serverless",
+            "command": command,
+            "output": "",
+            "error": str(e),
+            "execution_method": "Modal.com Error"
+        }
 
 # --- Diğer fonksiyonlar ---
 

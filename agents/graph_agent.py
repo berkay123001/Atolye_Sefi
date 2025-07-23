@@ -50,30 +50,38 @@ class GraphAgent:
         self.tools_dict = {
             "decide_architecture": decide_architecture,
             "find_and_prepare_gpu": find_and_prepare_gpu,
-            "start_task_on_pod": start_task_on_pod,  # Jupyter notebook komut hazırlama
+            "start_task_on_pod": start_task_on_pod,  # Modal.com serverless executor
             "execute_command_on_pod": execute_command_on_pod,  # Eski versiyon (fallback)
             "get_pod_status": get_pod_status,
-            # SSH araçlarını ekle
-            "execute_ssh_command": self._execute_ssh_command_wrapper,
+            # Modal executor wrapper
+            "execute_modal_command": self._execute_modal_command_wrapper,
         }
         
         # Grafiği oluştur
         self.graph = self.build_graph()
         print("🧠 GraphAgent: Çok adımlı hafıza sistemi aktif!")
 
-    def _execute_ssh_command_wrapper(self, **kwargs) -> Dict:
-        """SSH komut çalıştırma wrapper'ı."""
+    def _execute_modal_command_wrapper(self, **kwargs) -> Dict:
+        """Modal.com serverless komut çalıştırma wrapper'ı."""
         try:
-            from tools.ssh_pod_tools import execute_ssh_command
-            pod_id = kwargs.get("pod_id", "")
+            from tools.modal_executor import modal_executor
             command = kwargs.get("command", "")
             
-            if not pod_id or not command:
-                return {"status": "error", "message": "Pod ID ve komut gerekli"}
+            if not command:
+                return {"status": "error", "message": "Komut gerekli"}
             
-            return execute_ssh_command(pod_id, command)
+            # GPU gereksinimi tespit et
+            gpu_keywords = ["torch", "tensorflow", "cuda", "gpu", "model", "train", "ml", "neural"]
+            use_gpu = any(keyword in command.lower() for keyword in gpu_keywords)
+            
+            # Bash komutu mu Python kodu mu?
+            if any(command.strip().startswith(cmd) for cmd in ['ls', 'mkdir', 'cd', 'cp', 'mv', 'rm', 'cat', 'echo', 'wget', 'curl', 'git']):
+                return modal_executor.execute_bash_command(command)
+            else:
+                return modal_executor.execute_python_code(command, use_gpu=use_gpu)
+                
         except Exception as e:
-            return {"status": "error", "message": f"SSH hatası: {str(e)}"}
+            return {"status": "error", "message": f"Modal hatası: {str(e)}"}
 
     def _simulate_task_execution(self, **kwargs) -> Dict:
         """
@@ -185,19 +193,19 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             - Plan, doğrudan bir betik gibi çalıştırılabilir olmalı
 
             Kullanılabilir araçlar:
-            - find_and_prepare_gpu: Yeni pod oluşturmak için
-            - execute_ssh_command: Tek bash komutu çalıştırmak için
-            - get_pod_status: Pod durumunu kontrol etmek için
+            - execute_modal_command: Modal.com serverless ile komut çalıştırmak için
+            - get_pod_status: Pod durumunu kontrol etmek için (RunPod için)
 
             Format:
-            1. [execute_ssh_command] pwd
-            2. [execute_ssh_command] ls -la
-            3. [execute_ssh_command] mkdir /workspace/proje
-            4. [execute_ssh_command] cd /workspace/proje
-            5. [execute_ssh_command] echo "print('hello')" > test.py
-            6. [execute_ssh_command] python test.py
+            1. [execute_modal_command] pwd
+            2. [execute_modal_command] ls -la
+            3. [execute_modal_command] mkdir /workspace/proje
+            4. [execute_modal_command] cd /workspace/proje
+            5. [execute_modal_command] echo "print('hello')" > test.py
+            6. [execute_modal_command] python test.py
 
-            ÖNEMLİ: Her komut ayrı satır, tek işlem, bash uyumlu!"""),
+            ÖNEMLİ: Her komut ayrı satır, tek işlem, bash uyumlu!
+            Modal.com otomatik olarak serverless environment sağlar - pod oluşturmaya gerek yok!"""),
             ("user", "Görev: {task}")
         ])
         
@@ -260,8 +268,8 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
                 pod_id = self._extract_pod_id_from_context(state)
                 
                 # Parametreleri hazırla
-                if tool_name == "execute_ssh_command":
-                    tool_params = {"pod_id": pod_id, "command": bash_command}
+                if tool_name == "execute_modal_command":
+                    tool_params = {"command": bash_command}
                 elif tool_name == "find_and_prepare_gpu":
                     tool_params = {"min_memory_gb": 16}  # default
                 elif tool_name == "get_pod_status":
@@ -334,7 +342,7 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             bash_command = step[end+1:].strip()
         else:
             # Fallback
-            tool_name = "execute_ssh_command"
+            tool_name = "execute_modal_command"
             bash_command = step.strip()
         
         return tool_name, bash_command
@@ -508,6 +516,18 @@ Kullanıcıyla doğal bir sohbet yap. Kısa, net ve dostane cevaplar ver."""),
             "intermediate_steps": final_state.get("executed_steps", []),
             "plan": final_state.get("plan", [])
         }
+    
+    async def astream(self, input_data, config=None):
+        """Async stream ile graph'ı adım adım çalıştır"""
+        try:
+            print("🌊 GraphAgent: Async streaming başlıyor...")
+            async for output in self.graph.astream(input_data, config):
+                yield output
+        except Exception as e:
+            print(f"❌ GraphAgent stream error: {e}")
+            import traceback
+            traceback.print_exc()
+            yield {"error": str(e)}
 
 
 # === FACTORY FUNCTION ===
