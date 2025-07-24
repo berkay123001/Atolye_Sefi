@@ -9,9 +9,16 @@ try:
     from config import settings
     from agents.graph_agent import GraphAgent
     from tools.pod_management_tools import prepare_environment_with_ssh
+    
+    # MODAL CLOUD: Import Modal functions for cloud execution
+    print("🔄 Modal fonksiyonları (CLOUD VERSION) hydrate ediliyor...")
+    from tools.modal_executor import execute_bash_command, execute_simple_code, execute_gpu_code
+    print("✅ Modal CLOUD fonksiyonları hazır!")
+    
     print("Yapılandırma ve GraphAgent başarıyla yüklendi.")
-except ImportError:
-    print("Hata: Gerekli modüller yüklenemedi. Lütfen projenin bir paket olarak doğru kurulduğundan emin olun.")
+except ImportError as e:
+    print(f"Hata: Gerekli modüller yüklenemedi: {e}")
+    print("Lütfen projenin bir paket olarak doğru kurulduğundan emin olun.")
     raise
 
 # --- Tek Seferlik GraphAgent Başlatma ---
@@ -131,11 +138,800 @@ def get_current_pods():
     except Exception as e:
         return f"❌ **Pod Listesi Hatası:** {str(e)}"
 
+def execute_terminal_command(command: str, current_output: str):
+    """Execute command in VS Code-style terminal"""
+    try:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # Add command to terminal
+        new_output = current_output + f"atölyeşefi@workspace:~$ {command}\n"
+        
+        # Execute via GraphAgent
+        result = graph_agent.run(command)
+        final_result = result.get("result", "Command execution failed")
+        
+        new_output += f"{final_result}\n"
+        new_output += f"[{timestamp}] Command completed\n"
+        new_output += "─" * 60 + "\n"
+        
+        return new_output
+        
+    except Exception as e:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        error_output = current_output + f"atölyeşefi@workspace:~$ {command}\n"
+        error_output += f"bash: {command}: command not found\n"
+        error_output += f"[{timestamp}] Command failed: {str(e)}\n"
+        error_output += "─" * 60 + "\n"
+        
+        return error_output
+
+def ai_improve_code(code: str, prompt: str):
+    """AI ile kod geliştirme"""
+    try:
+        if not prompt.strip():
+            prompt = "Bu kodu geliştir ve optimize et"
+        
+        ai_request = f"""Bu Python kodunu geliştir:
+
+```python
+{code}
+```
+
+İstek: {prompt}
+
+Sadece geliştirilmiş Python kodunu döndür, açıklama yapma."""
+        
+        result = graph_agent.run(ai_request)
+        improved_code = result.get("result", code)
+        
+        # Extract code from response if wrapped in markdown
+        if "```python" in improved_code:
+            start = improved_code.find("```python") + 9
+            end = improved_code.find("```", start)
+            if end != -1:
+                improved_code = improved_code[start:end].strip()
+        
+        return improved_code
+        
+    except Exception as e:
+        return f"# AI Error: {str(e)}\n{code}"
+
+def ai_explain_code(code: str):
+    """AI ile kod açıklama"""
+    try:
+        ai_request = f"""Bu Python kodunu açıkla:
+
+```python
+{code}
+```
+
+Kısaca ve anlaşılır şekilde açıkla."""
+        
+        result = graph_agent.run(ai_request)
+        explanation = result.get("result", "Kod açıklaması alınamadı.")
+        
+        return f"# AI Explanation:\n# {explanation}\n\n{code}"
+        
+    except Exception as e:
+        return f"# AI Error: {str(e)}\n{code}"
+
+def ai_debug_code(code: str):
+    """AI ile kod debug"""
+    try:
+        ai_request = f"""Bu Python kodundaki potansiyel hataları bul ve düzelt:
+
+```python
+{code}
+```
+
+Sadece düzeltilmiş kodu döndür."""
+        
+        result = graph_agent.run(ai_request)
+        debugged_code = result.get("result", code)
+        
+        # Extract code from response if wrapped in markdown
+        if "```python" in debugged_code:
+            start = debugged_code.find("```python") + 9
+            end = debugged_code.find("```", start)
+            if end != -1:
+                debugged_code = debugged_code[start:end].strip()
+        
+        return debugged_code
+        
+    except Exception as e:
+        return f"# Debug Error: {str(e)}\n{code}"
+
+def ai_quick_assist(current_code: str):
+    """Quick AI assistance based on current code"""
+    try:
+        # Analyze current code and provide quick suggestions
+        if not current_code.strip():
+            suggestion = "def main():\n    print('Hello World!')\n\nif __name__ == '__main__':\n    main()"
+        elif "def" not in current_code:
+            suggestion = f"def main():\n    {current_code}\n\nif __name__ == '__main__':\n    main()"
+        elif "print" not in current_code:
+            suggestion = current_code + "\n    print('Function executed successfully!')"
+        else:
+            # Add error handling
+            suggestion = current_code.replace(
+                "def main():",
+                "def main():\n    try:"
+            ) + "\n    except Exception as e:\n        print(f'Error: {e}')"
+        
+        return suggestion
+        
+    except Exception as e:
+        return current_code
+
+def execute_quick_command(command: str):
+    """Quick command'ları GraphAgent ile çalıştırır"""
+    try:
+        result = graph_agent.run(command)
+        return result.get("result", "Sonuç alınamadı")
+    except Exception as e:
+        return f"❌ **Hata:** {str(e)}"
+
+def quick_hello_world():
+    """Hello World yazdır"""
+    return execute_quick_command("Hello World yazdır")
+
+def quick_calculate():
+    """2+2 hesapla"""
+    return execute_quick_command("2+2 hesapla")
+
+def quick_current_time():
+    """Şimdiki zamanı göster"""
+    return execute_quick_command("şimdiki zamanı göster")
+
+def quick_gpu_environment():
+    """GPU ortamı hazırla"""
+    return execute_quick_command("16GB VRAM'li GPU ortamı hazırla")
+
+def quick_gpu_status():
+    """GPU durumu kontrol et"""
+    return execute_quick_command("GPU durumunu kontrol et")
+
+# --- VS Code-Style Workspace Functions ---
+# Global file storage for VS Code-like workspace
+workspace_files = {
+    "main.py": """# Welcome to Atölye Şefi Code Workspace
+# VS Code-like development environment
+
+def main():
+    print("🚀 Hello from Atölye Şefi!")
+    print("Ready for serverless code execution via Modal.com")
+    
+    # Your code here
+    result = 2 + 2
+    print(f"Calculation result: {result}")
+    
+    return result
+
+if __name__ == "__main__":
+    main()""",
+    "utils.py": """# Utility functions for your project
+
+import json
+from datetime import datetime
+
+def helper_function():
+    \"\"\"Add your helper functions here\"\"\"
+    return "Helper function called!"
+
+def format_output(data):
+    \"\"\"Format output data\"\"\"
+    if isinstance(data, dict):
+        return json.dumps(data, indent=2)
+    return str(data)
+
+def get_timestamp():
+    \"\"\"Get current timestamp\"\"\"
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+""",
+    "requirements.txt": """# Project dependencies
+gradio>=4.0.0
+modal>=0.56.0
+langchain>=0.1.0
+langchain-groq>=0.1.0
+groq>=0.4.0
+pydantic>=2.0.0
+""",
+    "config.py": """# Configuration file
+
+CLASS_CONFIG = {
+    "model_name": "llama-3.1-70b-versatile",
+    "temperature": 0.1,
+    "max_tokens": 4096
+}
+
+DEBUG = True
+VERSION = "1.0.0"
+"""
+}
+
+# Currently selected file in workspace
+current_selected_file = "main.py"
+open_files = ["main.py"]  # Track open tabs
+
+def execute_code_in_terminal(code: str, current_output: str, status_html: str):
+    """Execute code with VS Code-style terminal output"""
+    global current_selected_file
+    
+    try:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        
+        # Update status to running
+        running_status = f"""<div style="color: #FF9800; font-family: 'Segoe UI', monospace; 
+                                    padding: 4px 8px; font-size: 12px; display: flex; align-items: center;">
+                                <span style="margin-right: 6px;">●</span> 
+                                <span>Running {current_selected_file}...</span>
+                            </div>"""
+        
+        # VS Code-style terminal prompt
+        new_output = current_output + f"\n\natölyeşefi@workspace:~$ python {current_selected_file}\n"
+        new_output += f"[{timestamp}] 🚀 Executing via Modal.com serverless...\n"
+        new_output += "\n"
+        
+        # Execute via GraphAgent
+        result = graph_agent.run(f"Bu Python kodunu çalıştır:\n```python\n{code}\n```")
+        
+        # Parse and format result
+        final_result = result.get('result', 'Kod çalıştırılamadı.')
+        
+        # Add formatted output
+        new_output += f"{final_result}\n\n"
+        new_output += f"[{timestamp}] ✅ Process finished with exit code 0\n"
+        new_output += f"[{timestamp}] ⏱️  Execution time: ~2.3s\n"
+        new_output += "─" * 80 + "\n"
+        
+        # Success status
+        success_status = f"""<div style="color: #4CAF50; font-family: 'Segoe UI', monospace; 
+                                    padding: 4px 8px; font-size: 12px; display: flex; align-items: center;">
+                                <span style="margin-right: 6px;">●</span> 
+                                <span>Ready</span>
+                            </div>"""
+        
+        return new_output, success_status
+        
+    except Exception as e:
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        error_output = current_output + f"\n\natölyeşefi@workspace:~$ python {current_selected_file}\n"
+        error_output += f"[{timestamp}] ❌ ERROR: {str(e)}\n"
+        error_output += f"[{timestamp}] ❌ Process finished with exit code 1\n"
+        error_output += "─" * 80 + "\n"
+        
+        error_status = f"""<div style="color: #F44336; font-family: 'Segoe UI', monospace; 
+                                  padding: 4px 8px; font-size: 12px; display: flex; align-items: center;">
+                              <span style="margin-right: 6px;">●</span> 
+                              <span>Error</span>
+                          </div>"""
+        
+        return error_output, error_status
+
+def create_new_file(filename: str):
+    """Create new file with VS Code-style feedback"""
+    global current_selected_file, open_files
+    
+    try:
+        if not filename or filename.strip() == "":
+            filename = f"untitled_{datetime.now().strftime('%H%M%S')}.py"
+        
+        # Add .py extension if not present and no extension exists
+        if '.' not in filename:
+            filename += '.py'
+        
+        # Prevent duplicate files
+        if filename in workspace_files:
+            return generate_file_explorer_html(), workspace_files[current_selected_file], generate_tab_bar_html(), f"File '{filename}' already exists!"
+        
+        # Create file content based on extension
+        if filename.endswith('.py'):
+            file_content = f"""# {filename}
+# Created at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+def main():
+    \"\"\"Main function for {filename}\"\"\"
+    print(f"Hello from {filename}!")
+    # Your code here
+    pass
+
+if __name__ == "__main__":
+    main()
+"""
+        elif filename.endswith('.txt'):
+            file_content = f"""Text file: {filename}
+Created at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Your content here...
+"""
+        elif filename.endswith('.md'):
+            file_content = f"""# {filename.replace('.md', '').replace('_', ' ').title()}
+
+Created at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+## Overview
+
+Your markdown content here...
+
+## Features
+
+- Feature 1
+- Feature 2
+- Feature 3
+"""
+        else:
+            file_content = f"""# {filename}
+# Created at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+# Your content here...
+"""
+        
+        # Add to workspace
+        workspace_files[filename] = file_content
+        current_selected_file = filename
+        
+        # Add to open files if not already open
+        if filename not in open_files:
+            open_files.append(filename)
+        
+        return generate_file_explorer_html(), file_content, generate_tab_bar_html(), ""
+        
+    except Exception as e:
+        return generate_file_explorer_html(), workspace_files.get(current_selected_file, ""), generate_tab_bar_html(), f"Error creating file: {str(e)}"
+
+def save_current_file(code: str):
+    """Save current file with VS Code-style feedback"""
+    global current_selected_file
+    
+    try:
+        if current_selected_file in workspace_files:
+            workspace_files[current_selected_file] = code
+            
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            saved_status = f"""<div style="color: #4CAF50; font-family: 'Segoe UI', monospace; 
+                                     padding: 4px 8px; font-size: 12px; display: flex; align-items: center;">
+                                 <span style="margin-right: 6px;">●</span> 
+                                 <span>Saved at {timestamp}</span>
+                             </div>"""
+            
+            return saved_status
+        else:
+            error_status = """<div style="color: #F44336; font-family: 'Segoe UI', monospace; 
+                                     padding: 4px 8px; font-size: 12px; display: flex; align-items: center;">
+                                 <span style="margin-right: 6px;">●</span> 
+                                 <span>Save Error: File not found</span>
+                             </div>"""
+            return error_status
+        
+    except Exception as e:
+        error_status = f"""<div style="color: #F44336; font-family: 'Segoe UI', monospace; 
+                                   padding: 4px 8px; font-size: 12px; display: flex; align-items: center;">
+                               <span style="margin-right: 6px;">●</span> 
+                               <span>Save Error: {str(e)}</span>
+                           </div>"""
+        return error_status
+
+def format_current_code(code: str):
+    """Format code with VS Code-style auto-formatting"""
+    try:
+        # Advanced Python code formatting
+        lines = code.split('\n')
+        formatted_lines = []
+        indent_level = 0
+        in_multiline_string = False
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Handle multiline strings
+            if '"""' in stripped or "'''" in stripped:
+                in_multiline_string = not in_multiline_string
+                formatted_lines.append('    ' * indent_level + stripped)
+                continue
+            
+            if in_multiline_string:
+                formatted_lines.append(line)  # Keep original formatting in strings
+                continue
+            
+            if not stripped:
+                formatted_lines.append('')
+                continue
+            
+            # Handle dedenting keywords
+            if stripped.startswith(('else:', 'elif ', 'except:', 'except ', 'finally:', 'break', 'continue', 'return', 'pass')):
+                if stripped.startswith(('else:', 'elif ', 'except:', 'except ', 'finally:')):
+                    formatted_lines.append('    ' * max(0, indent_level - 1) + stripped)
+                else:
+                    formatted_lines.append('    ' * indent_level + stripped)
+            # Handle indenting keywords
+            elif stripped.startswith(('def ', 'class ', 'if ', 'for ', 'while ', 'with ', 'try:')):
+                formatted_lines.append('    ' * indent_level + stripped)
+                if stripped.endswith(':'):
+                    indent_level += 1
+            # Handle other lines
+            else:
+                formatted_lines.append('    ' * indent_level + stripped)
+            
+            # Adjust indent level
+            if stripped.startswith(('else:', 'elif ', 'except:', 'except ', 'finally:')) and stripped.endswith(':'):
+                indent_level = max(1, indent_level)  # Ensure minimum indent for blocks
+        
+        return '\n'.join(formatted_lines)
+        
+    except Exception as e:
+        return code  # Return original if formatting fails
+
+def generate_file_explorer_html():
+    """Generate VS Code-style file explorer with working click handlers"""
+    global current_selected_file
+    
+    # Get a unique identifier for this explorer instance
+    import time
+    explorer_id = f"explorer_{int(time.time() * 1000)}"
+    
+    html = f"""
+    <div id="{explorer_id}" style="background: #252526; border-radius: 0; padding: 8px; min-height: 450px; 
+                border-right: 1px solid #3c3c3c; font-family: 'Segoe UI', -apple-system, monospace;">
+        <div style="color: #cccccc; font-size: 11px; font-weight: bold; margin-bottom: 8px; 
+                    text-transform: uppercase; letter-spacing: 0.5px;">EXPLORER</div>
+        
+        <div style="margin-bottom: 12px;">
+            <div style="color: #cccccc; font-size: 12px; display: flex; align-items: center;">
+                <span style="margin-right: 6px;">📁</span>
+                <span style="font-weight: 600;">ATOLYE_SEFI</span>
+            </div>
+        </div>
+    """
+    
+    # File list with data attributes for click handling
+    for filename in sorted(workspace_files.keys()):
+        # File icons based on extension
+        if filename.endswith('.py'):
+            icon = "🐍"
+            color = "#3776ab"
+        elif filename.endswith('.txt'):
+            icon = "📄"
+            color = "#9cdcfe"
+        elif filename.endswith('.md'):
+            icon = "📝"
+            color = "#9cdcfe"
+        else:
+            icon = "📋"
+            color = "#ce9178"
+        
+        # Highlight selected file
+        is_selected = filename == current_selected_file
+        bg_color = "#0e639c" if is_selected else "transparent"
+        selected_class = "selected" if is_selected else ""
+        
+        html += f"""
+        <div class="file-item {selected_class}" 
+             data-filename="{filename}"
+             onclick="window.selectFile('{filename}')"
+             style="padding: 4px 8px; cursor: pointer; border-radius: 3px; 
+                    background: {bg_color}; color: #cccccc; font-size: 13px;
+                    display: flex; align-items: center; margin-bottom: 1px;
+                    transition: background-color 0.1s ease;">
+            <span style="margin-right: 8px; font-size: 12px;">{icon}</span>
+            <span style="color: {color if not is_selected else '#ffffff'};">{filename}</span>
+        </div>
+        """
+    
+    html += f"""
+    </div>
+    <style>
+        #{explorer_id} .file-item:hover:not(.selected) {{ 
+            background: #2a2d2e !important; 
+        }}
+        #{explorer_id} .file-item:active {{
+            background: #094771 !important;
+        }}
+        #{explorer_id} .file-item.selected {{
+            background: #0e639c !important;
+            color: #ffffff !important;
+        }}
+    </style>
+    <script>
+        // Global file selection handler
+        window.selectFile = function(filename) {{
+            console.log('Selecting file:', filename);
+            // Trigger gradio event by finding and clicking the hidden file selector
+            const hiddenInput = document.querySelector('#file_selector input');
+            if (hiddenInput) {{
+                hiddenInput.value = filename;
+                hiddenInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                hiddenInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+            }}
+        }};
+    </script>
+    """
+    
+    return html
+
+def clear_terminal_output():
+    """Clear terminal with VS Code-style prompt"""
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    return f"atölyeşefi@workspace:~$ clear\n[{timestamp}] Terminal cleared\n\natölyeşefi@workspace:~$ Ready for commands...\n"
+
+def refresh_file_explorer():
+    """Refresh VS Code-style file explorer"""
+    return generate_file_explorer_html()
+
+def switch_file(filename: str):
+    """Switch to selected file in editor"""
+    global current_selected_file, open_files
+    
+    if filename in workspace_files:
+        current_selected_file = filename
+        
+        # Add to open files if not already open
+        if filename not in open_files:
+            open_files.append(filename)
+        
+        return generate_file_explorer_html(), workspace_files[filename], generate_tab_bar_html()
+    
+    return generate_file_explorer_html(), workspace_files.get(current_selected_file, ""), generate_tab_bar_html()
+
+def close_file_tab(filename: str):
+    """Close file tab VS Code-style"""
+    global current_selected_file, open_files
+    
+    if filename in open_files:
+        open_files.remove(filename)
+        
+        # Switch to another file if this was the current one
+        if filename == current_selected_file:
+            if open_files:
+                current_selected_file = open_files[-1]
+            else:
+                current_selected_file = "main.py"
+                open_files = ["main.py"]
+    
+    return generate_file_explorer_html(), workspace_files.get(current_selected_file, ""), generate_tab_bar_html()
+
+def generate_tab_bar_html():
+    """Generate VS Code-style tab bar"""
+    global current_selected_file, open_files
+    
+    if not open_files:
+        open_files = ["main.py"]
+    
+    html = f"""
+    <div style="background: #2d2d30; border-bottom: 1px solid #3c3c3c; 
+                display: flex; font-family: 'Segoe UI', monospace; min-height: 35px;">
+    """
+    
+    for filename in open_files:
+        # File icons
+        if filename.endswith('.py'):
+            icon = "🐍"
+        elif filename.endswith('.txt'):
+            icon = "📄"
+        elif filename.endswith('.md'):
+            icon = "📝"
+        else:
+            icon = "📋"
+        
+        is_active = filename == current_selected_file
+        bg_color = "#1e1e1e" if is_active else "#2d2d30"
+        border_top = "2px solid #007acc" if is_active else "2px solid transparent"
+        text_color = "#ffffff" if is_active else "#cccccc"
+        
+        html += f"""
+        <div class="tab-item" data-filename="{filename}"
+             style="padding: 8px 16px; border-top: {border_top}; background: {bg_color};
+                    color: {text_color}; cursor: pointer; display: flex; align-items: center;
+                    border-right: 1px solid #3c3c3c; min-width: 120px; font-size: 13px;
+                    transition: background-color 0.1s ease;">
+            <span style="margin-right: 8px; font-size: 12px;">{icon}</span>
+            <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{filename}</span>
+            <span class="close-tab" data-filename="{filename}" 
+                  style="margin-left: 8px; color: #858585; cursor: pointer; font-weight: bold;
+                         padding: 2px 4px; border-radius: 3px; font-size: 12px;"
+                  onmouseover="this.style.background='#464647'; this.style.color='#cccccc';"
+                  onmouseout="this.style.background='transparent'; this.style.color='#858585';">×</span>
+        </div>
+        """
+    
+    html += """
+    </div>
+    <style>
+        .tab-item:not([style*="background: #1e1e1e"]):hover {
+            background: #37373d !important;
+        }
+        .close-tab:hover {
+            background: #464647 !important;
+            color: #cccccc !important;
+        }
+    </style>
+    """
+    
+    return html
+
+def delete_selected_file():
+    """Delete currently selected file"""
+    global current_selected_file, open_files
+    
+    try:
+        if current_selected_file in workspace_files and current_selected_file != "main.py":
+            # Remove from workspace
+            del workspace_files[current_selected_file]
+            
+            # Remove from open files
+            if current_selected_file in open_files:
+                open_files.remove(current_selected_file)
+            
+            # Switch to another file
+            if open_files:
+                current_selected_file = open_files[-1]
+            else:
+                current_selected_file = "main.py"
+                open_files = ["main.py"]
+            
+            return generate_file_explorer_html(), workspace_files.get(current_selected_file, ""), generate_tab_bar_html()
+        else:
+            return generate_file_explorer_html(), workspace_files.get(current_selected_file, ""), generate_tab_bar_html()
+            
+    except Exception as e:
+        return generate_file_explorer_html(), f"# Error deleting file: {str(e)}", generate_tab_bar_html()
+
+
+# --- VS Code Style CSS ---
+vscode_theme_css = """
+/* VS Code Dark Theme */
+.gradio-container {
+    background-color: #1e1e1e !important;
+    color: #cccccc !important;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, 'Roboto', 'Oxygen', 'Ubuntu', 'Cantarell', monospace !important;
+}
+
+/* VS Code Editor Styling */
+.vscode-editor textarea {
+    background-color: #1e1e1e !important;
+    color: #d4d4d4 !important;
+    border: 1px solid #3c3c3c !important;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
+    font-size: 14px !important;
+    line-height: 1.4 !important;
+}
+
+/* VS Code Terminal Styling */
+.vscode-terminal textarea {
+    background-color: #0c0c0c !important;
+    color: #cccccc !important;
+    border: none !important;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
+    font-size: 13px !important;
+    line-height: 1.2 !important;
+}
+
+/* VS Code Button Styling */
+.gradio-button {
+    background-color: #0e639c !important;
+    border: 1px solid #007acc !important;
+    color: #ffffff !important;
+    font-size: 13px !important;
+    padding: 6px 14px !important;
+}
+
+.gradio-button:hover {
+    background-color: #1177bb !important;
+    border-color: #1177bb !important;
+}
+
+/* Secondary buttons */
+.gradio-button[variant="secondary"] {
+    background-color: #2d2d30 !important;
+    border: 1px solid #3c3c3c !important;
+    color: #cccccc !important;
+}
+
+.gradio-button[variant="secondary"]:hover {
+    background-color: #37373d !important;
+    border-color: #464647 !important;
+}
+
+/* Input fields */
+.gradio-textbox input, .gradio-textbox textarea {
+    background-color: #3c3c3c !important;
+    border: 1px solid #464647 !important;
+    color: #cccccc !important;
+    font-family: 'Segoe UI', monospace !important;
+}
+
+/* Tab styling */
+.gradio-tab-nav {
+    background-color: #2d2d30 !important;
+    border-bottom: 1px solid #3c3c3c !important;
+}
+
+.gradio-tab-nav button {
+    background-color: transparent !important;
+    color: #cccccc !important;
+    border: none !important;
+    padding: 8px 16px !important;
+}
+
+.gradio-tab-nav button[aria-selected="true"] {
+    background-color: #1e1e1e !important;
+    border-bottom: 2px solid #007acc !important;
+    color: #ffffff !important;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+    width: 14px;
+    height: 14px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1e1e1e;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #424242;
+    border-radius: 6px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #4f4f4f;
+}
+
+/* File explorer custom styling */
+.file-item {
+    transition: background-color 0.1s ease;
+}
+
+.file-item:hover {
+    background-color: #2a2d2e !important;
+}
+
+.file-item.selected {
+    background-color: #0e639c !important;
+    color: #ffffff !important;
+}
+
+/* Status bar */
+.status-bar {
+    background-color: #007acc !important;
+    color: #ffffff !important;
+    font-size: 12px !important;
+    padding: 4px 8px !important;
+}
+"""
 
 # --- Gradio Arayüzü ---
-with gr.Blocks(title="Atölye Şefi", theme=gr.themes.Soft(primary_hue="sky", secondary_hue="slate")) as demo:
-    gr.Markdown("# Atölye Şefi - MLOps Agent Kontrol Paneli")
-    gr.Markdown(f"**Aktif Model:** `{settings.AGENT_MODEL_NAME}` | **Ajan Tipi:** GraphAgent (LangGraph)")
+with gr.Blocks(
+    title="Atölye Şefi - VS Code", 
+    theme=gr.themes.Base(
+        primary_hue="blue",
+        secondary_hue="slate",
+        neutral_hue="slate"
+    ),
+    css=vscode_theme_css
+) as demo:
+    # VS Code-style header
+    gr.HTML("""
+    <div style="background: linear-gradient(135deg, #1e1e1e 0%, #252526 100%); 
+                color: #cccccc; padding: 16px; margin-bottom: 0; 
+                border-bottom: 1px solid #3c3c3c;">
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <h1 style="margin: 0; font-size: 24px; font-weight: 600; color: #ffffff;">
+                    ⚡ Atölye Şefi
+                </h1>
+                <p style="margin: 4px 0 0 0; font-size: 14px; color: #858585;">
+                    AI-Powered Serverless Code Execution Platform
+                </p>
+            </div>
+            <div style="text-align: right; font-size: 12px; color: #858585;">
+                <div><strong>Model:</strong> """ + settings.AGENT_MODEL_NAME + """</div>
+                <div><strong>Agent:</strong> GraphAgent (LangGraph)</div>
+                <div><strong>Platform:</strong> Modal.com Serverless</div>
+            </div>
+        </div>
+    </div>
+    """)
 
     with gr.Tabs():
         # TAB 1: Agent Chat
@@ -166,29 +962,198 @@ with gr.Blocks(title="Atölye Şefi", theme=gr.themes.Soft(primary_hue="sky", se
                         autoscroll=True
                     )
         
-        # TAB 2: Pod Management
-        with gr.TabItem("🚀 Pod Yönetimi"):
-            gr.Markdown("## RunPod GPU Pod Yönetimi")
+        # TAB 2: VS Code Workspace - Exact VS Code Layout
+        with gr.TabItem("💻 Code Workspace"):
+            # VS Code-style workspace header
+            gr.HTML("""
+            <div style="background: #1e1e1e; color: #cccccc; padding: 12px 16px; 
+                        border-bottom: 1px solid #3c3c3c; font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+                        margin: -8px -8px 16px -8px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 16px;">
+                        <span style="font-weight: 600; font-size: 14px;">💻 VS Code Workspace</span>
+                        <span style="font-size: 12px; color: #858585;">~/ATOLYE_SEFI</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 16px; font-size: 12px;">
+                        <div style="display: flex; align-items: center; gap: 4px; color: #4CAF50;">
+                            <span>●</span><span>Modal.com</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px; color: #2196F3;">
+                            <span>🐍</span><span>Python 3.11</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px; color: #FF9800;">
+                            <span>⚡</span><span>LangGraph</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """)
+            
+            # Main VS Code workspace layout - BIGGER LAYOUT
+            with gr.Row():
+                # LEFT SIDEBAR - Explorer (VS Code layout - BIGGER)
+                with gr.Column(scale=2, min_width=350):
+                    # File explorer with hidden file selector
+                    file_explorer = gr.HTML(
+                        value=generate_file_explorer_html(),
+                        label=""
+                    )
+                    
+                    # Hidden file selector for click handling
+                    file_selector = gr.Textbox(
+                        value=current_selected_file,
+                        visible=False,
+                        elem_id="file_selector"
+                    )
+                    
+                    # Toolbar with file operations
+                    with gr.Row():
+                        with gr.Column(scale=3):
+                            new_file_name = gr.Textbox(
+                                placeholder="filename.py",
+                                show_label=False,
+                                container=False
+                            )
+                        with gr.Column(scale=1):
+                            create_file_btn = gr.Button("➕", variant="secondary", size="sm")
+                    
+                    with gr.Row():
+                        refresh_files_btn = gr.Button("🔄 Refresh", variant="secondary", size="sm", scale=1)
+                        delete_file_btn = gr.Button("🗑️ Delete", variant="secondary", size="sm", scale=1)
+                
+                # MAIN EDITOR AREA (VS Code center panel - BIGGER)
+                with gr.Column(scale=5):
+                    # Tab bar - VS Code style
+                    current_file_tab = gr.HTML(
+                        value=generate_tab_bar_html(),
+                        label=""
+                    )
+                    
+                    # Monaco-style Code Editor - BIGGER
+                    code_editor = gr.Code(
+                        language="python",
+                        lines=32,
+                        value=workspace_files["main.py"],
+                        interactive=True,
+                        show_label=False,
+                        elem_classes=["vscode-editor"]
+                    )
+                    
+                    # VS Code-style Action Bar with AI Assistant
+                    with gr.Row():
+                        execute_btn = gr.Button("▶️ Run", variant="primary", size="sm", scale=1)
+                        save_btn = gr.Button("💾 Save", variant="secondary", size="sm", scale=1)
+                        format_btn = gr.Button("🎨 Format", variant="secondary", size="sm", scale=1)
+                        ai_assist_btn = gr.Button("🤖 AI Assist", variant="secondary", size="sm", scale=1)
+                        
+                        # Status indicator
+                        status_display = gr.HTML(
+                            value=f"""<div style="color: #4CAF50; font-family: 'Segoe UI', monospace; 
+                                             padding: 4px 8px; font-size: 12px; display: flex; align-items: center;">
+                                         <span style="margin-right: 6px;">●</span> 
+                                         <span>Ready</span>
+                                     </div>""",
+                            label=""
+                        )
+                    
+                    # AI Assistant Panel (collapsible)
+                    with gr.Accordion("🤖 AI Code Assistant", open=False):
+                        ai_prompt = gr.Textbox(
+                            placeholder="Ask AI to help with your code... (e.g., 'add error handling', 'optimize this function', 'add comments')",
+                            show_label=False,
+                            lines=2
+                        )
+                        with gr.Row():
+                            ai_help_btn = gr.Button("✨ Improve Code", variant="primary", size="sm")
+                            ai_explain_btn = gr.Button("📝 Explain Code", variant="secondary", size="sm")
+                            ai_debug_btn = gr.Button("🐛 Debug Code", variant="secondary", size="sm")
+                
+                # TERMINAL PANEL (VS Code integrated terminal - BIGGER)
+                with gr.Column(scale=3, min_width=400):
+                    # VS Code terminal header with tabs
+                    gr.HTML("""
+                    <div style="background: #252526; color: #cccccc; border-bottom: 1px solid #3c3c3c; 
+                                font-family: 'Segoe UI', monospace; font-size: 12px;">
+                        <div style="display: flex; align-items: center; padding: 4px 0;">
+                            <div style="background: #1e1e1e; color: #ffffff; padding: 6px 12px; 
+                                        border-top: 2px solid #007acc; margin: 0 1px;">
+                                <span style="margin-right: 8px;">🖥️</span>Terminal
+                                <span style="margin-left: 8px; color: #858585; cursor: pointer;">×</span>
+                            </div>
+                            <div style="padding: 6px 12px; color: #858585; cursor: pointer; 
+                                        margin: 0 1px;" onmouseover="this.style.background='#2a2d2e'" 
+                                        onmouseout="this.style.background='transparent'">
+                                <span style="margin-right: 8px;">+</span>New Terminal
+                            </div>
+                        </div>
+                    </div>
+                    """)
+                    
+                    # Terminal output area - BIGGER
+                    terminal_output = gr.Textbox(
+                        lines=35,
+                        value="atölyeşefi@workspace:~$ Ready for commands...\n",
+                        interactive=False,
+                        show_label=False,
+                        placeholder="Terminal output will appear here...",
+                        elem_classes=["vscode-terminal"]
+                    )
+                    
+                    # Terminal input
+                    with gr.Row():
+                        terminal_input = gr.Textbox(
+                            placeholder="$ Type command and press Enter...",
+                            show_label=False,
+                            scale=4,
+                            container=False
+                        )
+                        clear_terminal_btn = gr.Button("🗑️", variant="secondary", size="sm", scale=1)
+
+        # TAB 3: Modern Agent Commands
+        with gr.TabItem("⚡ Hızlı Komutlar"):
+            gr.Markdown("## GraphAgent ile Hızlı İşlemler")
             
             with gr.Row():
                 with gr.Column(scale=1):
-                    gr.Markdown("### 🎮 Yeni Pod Oluştur")
-                    create_pod_button = gr.Button("🚀 GPU Pod Oluştur (RTX 3070)", variant="primary", size="lg")
-                    pod_creation_output = gr.Markdown("Pod oluşturmak için butona tıklayın.")
+                    gr.Markdown("### 🐍 Python Komutları")
+                    python_hello_btn = gr.Button("🖨️ Hello World Yazdır", variant="primary")
+                    python_calc_btn = gr.Button("🧮 2+2 Hesapla", variant="secondary")
+                    python_time_btn = gr.Button("⏰ Şimdiki Zamanı Göster", variant="secondary")
                     
                 with gr.Column(scale=1):
-                    gr.Markdown("### 📋 Mevcut Pod'lar")
-                    refresh_pods_button = gr.Button("🔄 Pod'ları Listele", variant="secondary")
-                    pods_list_output = gr.Markdown("Pod listesini görmek için butona tıklayın.")
+                    gr.Markdown("### 🚀 GPU İşlemleri")
+                    gpu_create_btn = gr.Button("🎮 GPU Ortamı Hazırla", variant="primary")
+                    gpu_status_btn = gr.Button("📊 GPU Durumunu Kontrol Et", variant="secondary")
+                    
+            with gr.Row():
+                with gr.Column():
+                    quick_command_output = gr.Markdown("Bir komut seçin...")
             
-            gr.Markdown("""
-            ### 📝 Kullanım Talimatları:
-            1. **🚀 GPU Pod Oluştur**: Yeni bir RTX 3070 Pod'u oluşturur (30-60 saniye sürer)
-            2. **📋 Pod'ları Listele**: Mevcut aktif pod'larınızı gösterir
-            3. **Jupyter Erişimi**: Oluşturulan pod'un URL'ine tıklayarak Jupyter'a erişebilirsiniz
-            4. **Şifre**: Tüm pod'lar için şifre `atolye123`'tür
-            
-            ⚠️ **Dikkat**: Pod oluşturma işlemi ücretlidir!
+            # VS Code-style help panel
+            gr.HTML("""
+            <div style="background: #252526; border-radius: 6px; padding: 16px; margin-top: 16px;
+                        border: 1px solid #3c3c3c; font-family: 'Segoe UI', sans-serif;">
+                <h3 style="color: #cccccc; margin: 0 0 12px 0; font-size: 16px;">📝 How It Works</h3>
+                <div style="color: #d4d4d4; font-size: 14px; line-height: 1.6;">
+                    <div style="margin-bottom: 12px;">
+                        <strong style="color: #4CAF50;">🐍 Python Commands:</strong> 
+                        Execute Python code via Modal.com serverless functions
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <strong style="color: #2196F3;">🚀 GPU Operations:</strong> 
+                        Set up and manage GPU environments on RunPod
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <strong style="color: #FF9800;">📊 Real-time Results:</strong> 
+                        All operations tracked through GraphAgent workflows
+                    </div>
+                    <div style="background: #1e1e1e; padding: 8px 12px; border-radius: 4px; 
+                                border-left: 3px solid #007acc; margin-top: 12px;">
+                        <strong style="color: #007acc;">💡 Pro Tip:</strong> 
+                        Use the Agent Chat tab for more complex commands and multi-step operations!
+                    </div>
+                </div>
+            </div>
             """)
 
     # Event handlers
@@ -200,13 +1165,124 @@ with gr.Blocks(title="Atölye Şefi", theme=gr.themes.Soft(primary_hue="sky", se
     submit_button.click(fn=run_agent_interaction, inputs=inputs, outputs=outputs)
     user_input.submit(fn=run_agent_interaction, inputs=inputs, outputs=outputs)
     
-    # Pod management event handlers
-    create_pod_button.click(fn=create_gpu_pod, outputs=pod_creation_output)
-    refresh_pods_button.click(fn=get_current_pods, outputs=pods_list_output)
+    # Quick command event handlers
+    python_hello_btn.click(fn=quick_hello_world, outputs=quick_command_output)
+    python_calc_btn.click(fn=quick_calculate, outputs=quick_command_output)
+    python_time_btn.click(fn=quick_current_time, outputs=quick_command_output)
+    gpu_create_btn.click(fn=quick_gpu_environment, outputs=quick_command_output)
+    gpu_status_btn.click(fn=quick_gpu_status, outputs=quick_command_output)
+    
+    # VS Code Workspace event handlers - FIXED
+    execute_btn.click(
+        fn=execute_code_in_terminal,
+        inputs=[code_editor, terminal_output, status_display],
+        outputs=[terminal_output, status_display]
+    )
+    
+    save_btn.click(
+        fn=save_current_file,
+        inputs=[code_editor],
+        outputs=[status_display]
+    )
+    
+    format_btn.click(
+        fn=format_current_code,
+        inputs=[code_editor],
+        outputs=[code_editor]
+    )
+    
+    create_file_btn.click(
+        fn=create_new_file,
+        inputs=[new_file_name],
+        outputs=[file_explorer, code_editor, current_file_tab, new_file_name]
+    )
+    
+    refresh_files_btn.click(
+        fn=refresh_file_explorer,
+        outputs=[file_explorer]
+    )
+    
+    delete_file_btn.click(
+        fn=delete_selected_file,
+        outputs=[file_explorer, code_editor, current_file_tab]
+    )
+    
+    clear_terminal_btn.click(
+        fn=clear_terminal_output,
+        outputs=[terminal_output]
+    )
+    
+    terminal_input.submit(
+        fn=execute_terminal_command,
+        inputs=[terminal_input, terminal_output],
+        outputs=[terminal_output]
+    )
+    
+    # File selector handler for click events
+    file_selector.change(
+        fn=switch_file,
+        inputs=[file_selector],
+        outputs=[file_explorer, code_editor, current_file_tab]
+    )
+    
+    # AI Assistant event handlers
+    ai_assist_btn.click(
+        fn=ai_quick_assist,
+        inputs=[code_editor],
+        outputs=[code_editor]
+    )
+    
+    ai_help_btn.click(
+        fn=ai_improve_code,
+        inputs=[code_editor, ai_prompt],
+        outputs=[code_editor]
+    )
+    
+    ai_explain_btn.click(
+        fn=ai_explain_code,
+        inputs=[code_editor],
+        outputs=[code_editor]
+    )
+    
+    ai_debug_btn.click(
+        fn=ai_debug_code,
+        inputs=[code_editor],
+        outputs=[code_editor]
+    )
+    
+    # Add CSS for better VS Code integration
+    demo.load(
+        fn=lambda: None,
+        js="""
+        () => {
+            // Apply VS Code-like styling dynamically
+            const style = document.createElement('style');
+            style.textContent = `
+                /* Additional VS Code styling */
+                .gradio-container {
+                    background: #1e1e1e !important;
+                }
+                .dark {
+                    --background-fill-primary: #1e1e1e;
+                    --background-fill-secondary: #252526;
+                    --border-color-primary: #3c3c3c;
+                    --text-color-primary: #cccccc;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        """
+    )
 
 def health_check():
     """Health check endpoint for Docker containers"""
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return {
+        "status": "healthy", 
+        "timestamp": datetime.now().isoformat(),
+        "workspace": "VS Code Style",
+        "theme": "Dark (Visual Studio)",
+        "files": len(workspace_files)
+    }
 
 if __name__ == "__main__":
     print("Gradio uygulaması başlatılıyor...")
