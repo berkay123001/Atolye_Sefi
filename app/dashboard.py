@@ -7,7 +7,8 @@ from datetime import datetime
 # --- Proje Bileşenleri ---
 try:
     from config import settings
-    from agents.graph_agent import GraphAgent
+    # NEW: ReactAgent V3 - WITH REAL FILE CREATION!
+    from agents.react_agent_v3 import ReactAgentV3 as GraphAgent
     from tools.pod_management_tools import prepare_environment_with_ssh
     
     # MODAL CLOUD: Import Modal functions for cloud execution
@@ -81,6 +82,49 @@ def run_agent_interaction(user_message: str, history: list, logs: str):
     
     # 7. Güncellenmiş history, logs ve temizlenmiş input'u döndür
     return history, current_logs, ""
+
+# Debug Workspace Helper Functions
+def refresh_file_list():
+    """Refresh the file dropdown list"""
+    try:
+        # List files from Modal workspace volume
+        from tools.modal_executor import list_workspace_files
+        result = list_workspace_files.remote()
+        if result["status"] == "success":
+            file_choices = [f["name"] for f in result["files"]]
+            return gr.Dropdown(choices=file_choices, value=file_choices[0] if file_choices else None)
+    except:
+        # Fallback to local files
+        import os
+        local_files = [f for f in os.listdir(".") if f.endswith(('.py', '.txt', '.md'))]
+        return gr.Dropdown(choices=local_files, value=local_files[0] if local_files else None)
+    
+    return gr.Dropdown(choices=[], value=None)
+
+def load_file_content(filename):
+    """Load file content for viewer"""
+    if not filename:
+        return ""
+    
+    try:
+        # Try to get from Modal workspace
+        from tools.modal_executor import get_workspace_file
+        result = get_workspace_file.remote(filename)
+        if result["status"] == "success":
+            return result["content"]
+    except:
+        pass
+    
+    # Fallback to local file
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            return f.read()
+    except:
+        return f"Error: Could not load file {filename}"
+
+def get_debug_logs():
+    """Get current debug logs"""
+    return "🔧 Debug logs will appear here when agent runs..."
 
 def create_gpu_pod():
     """GPU Pod oluşturma fonksiyonu"""
@@ -262,6 +306,465 @@ def ai_quick_assist(current_code: str):
         
     except Exception as e:
         return current_code
+
+# === SIMPLE WORKSPACE FUNCTIONS ===
+# Global workspace state
+simple_workspace_files = {
+    "main.py": """# Welcome to Simple Workspace
+print("Hello from Atölye Şefi!")
+print("Ready for modal execution!")
+
+def main():
+    result = 2 + 2
+    print(f"Calculation: {result}")
+    return result
+
+if __name__ == "__main__":
+    main()""",
+    "utils.py": """# Utility functions
+def helper():
+    return "Helper function called!"
+
+def calculate(a, b):
+    return a + b
+
+print("Utils loaded!")""",
+    "train.py": """# Training script
+import time
+
+def train_model():
+    print("Starting training...")
+    for epoch in range(3):
+        print(f"Epoch {epoch + 1}/3")
+        time.sleep(0.5)
+    print("Training completed!")
+
+if __name__ == "__main__":
+    train_model()"""
+}
+
+def get_workspace_file_content(filename: str):
+    """Get file content from workspace"""
+    if not filename:
+        return "# No file selected"
+    return simple_workspace_files.get(filename, f"# File {filename} not found")
+
+def save_to_modal_workspace(filename: str, content: str):
+    """Save file to Modal workspace volume"""
+    try:
+        # Update local workspace first
+        simple_workspace_files[filename] = content
+        
+        # Try to save to modal volume (if modal is available)
+        try:
+            from tools.modal_executor import save_generated_code
+            result = save_generated_code.remote(filename, content)
+            return f"✅ {filename} saved to local + Modal workspace!"
+        except Exception as modal_error:
+            print(f"Modal save failed: {modal_error}")
+            return f"✅ {filename} saved locally (Modal unavailable)"
+        
+    except Exception as e:
+        return f"❌ Error saving {filename}: {str(e)}"
+
+def load_from_modal_workspace():
+    """Load files from Modal workspace volume"""
+    try:
+        from tools.modal_executor import list_workspace_files
+        
+        result = list_workspace_files.remote()
+        
+        if result["status"] == "success":
+            files = result["files"]
+            # Update local workspace with modal files
+            for file_info in files:
+                simple_workspace_files[file_info["name"]] = file_info["content"]
+            
+            return list(simple_workspace_files.keys())
+        else:
+            return list(simple_workspace_files.keys())
+            
+    except Exception as e:
+        print(f"Modal workspace load error: {e}")
+        return list(simple_workspace_files.keys())
+
+def execute_file_in_modal(filename: str, content: str):
+    """Execute file content in Modal"""
+    try:
+        # Try modal execution first
+        try:
+            from tools.modal_executor import execute_simple_code
+            result = execute_simple_code.remote(content)
+            
+            if result["status"] == "success":
+                output = result.get("output", "No output")
+                return f"✅ Executed {filename} in Modal:\n\n{output}"
+            else:
+                error = result.get("error", "Unknown error")
+                return f"❌ Modal error in {filename}:\n\n{error}"
+                
+        except Exception as modal_error:
+            # Fallback to local execution
+            print(f"Modal execution failed: {modal_error}")
+            
+            # Local execution fallback
+            import sys
+            from io import StringIO
+            
+            old_stdout = sys.stdout
+            sys.stdout = mystdout = StringIO()
+            
+            try:
+                exec(content, {"__name__": "__main__"})
+                output = mystdout.getvalue()
+                return f"✅ Executed {filename} locally (Modal unavailable):\n\n{output}"
+            except Exception as exec_error:
+                return f"❌ Local execution error in {filename}:\n\n{str(exec_error)}"
+            finally:
+                sys.stdout = old_stdout
+            
+    except Exception as e:
+        return f"❌ Execution error: {str(e)}"
+
+# Global current file tracker
+current_workspace_file = "main.py"
+
+def generate_file_sidebar_html():
+    """Generate clickable file sidebar like VS Code"""
+    global current_workspace_file
+    
+    html = f"""
+    <div style="background: #252526; border-radius: 0; padding: 4px; min-height: 350px; 
+                font-family: 'Segoe UI', monospace; margin: 0;">
+    """
+    
+    for filename in sorted(simple_workspace_files.keys()):
+        # File icons - smaller
+        if filename.endswith('.py'):
+            icon = "🐍"
+            color = "#3776ab"
+        elif filename.endswith('.txt'):
+            icon = "📄"
+            color = "#9cdcfe"
+        elif filename.endswith('.md'):
+            icon = "📝"
+            color = "#9cdcfe"
+        else:
+            icon = "📋"
+            color = "#ce9178"
+        
+        # Highlight selected file
+        is_selected = filename == current_workspace_file
+        bg_color = "#0e639c" if is_selected else "transparent"
+        text_color = "#ffffff" if is_selected else color
+        
+        html += f"""
+        <div class="file-item" 
+             onclick="window.selectWorkspaceFile('{filename}')"
+             style="padding: 3px 6px; cursor: pointer; border-radius: 2px; 
+                    background: {bg_color}; color: {text_color}; font-size: 11px;
+                    display: flex; align-items: center; margin-bottom: 1px;
+                    transition: background-color 0.1s ease;">
+            <span style="margin-right: 4px; font-size: 10px;">{icon}</span>
+            <span>{filename}</span>
+        </div>
+        """
+    
+    html += """
+    </div>
+    <style>
+        .file-item:hover:not([style*="background: #0e639c"]) { 
+            background: #2a2d2e !important; 
+        }
+        .file-item:active {
+            background: #094771 !important;
+        }
+    </style>
+    <script>
+        window.selectWorkspaceFile = function(filename) {
+            console.log('Selecting workspace file:', filename);
+            
+            // Multiple attempts to find the hidden selector
+            let hiddenSelector = document.querySelector('#workspace_file_selector input');
+            if (!hiddenSelector) {
+                hiddenSelector = document.querySelector('#workspace_file_selector textarea');
+            }
+            if (!hiddenSelector) {
+                hiddenSelector = document.querySelector('[data-testid="textbox"]');
+            }
+            
+            if (hiddenSelector) {
+                console.log('Found selector:', hiddenSelector);
+                hiddenSelector.value = filename;
+                hiddenSelector.dispatchEvent(new Event('input', { bubbles: true }));
+                hiddenSelector.dispatchEvent(new Event('change', { bubbles: true }));
+                
+                // Force trigger
+                const event = new CustomEvent('gradio-change', { 
+                    detail: { value: filename },
+                    bubbles: true 
+                });
+                hiddenSelector.dispatchEvent(event);
+            } else {
+                console.error('Hidden selector not found');
+                // Fallback: try all textboxes
+                const allInputs = document.querySelectorAll('input, textarea');
+                console.log('All inputs found:', allInputs.length);
+                for (let input of allInputs) {
+                    if (input.style.display === 'none' || input.parentElement.style.display === 'none') {
+                        console.log('Trying hidden input:', input);
+                        input.value = filename;
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                        input.dispatchEvent(new Event('change', { bubbles: true }));
+                        break;
+                    }
+                }
+            }
+        };
+    </script>
+    """
+    
+    return html
+
+def switch_workspace_file(filename: str):
+    """Switch to selected workspace file"""
+    global current_workspace_file
+    
+    if filename in simple_workspace_files:
+        current_workspace_file = filename
+        return generate_file_sidebar_html(), simple_workspace_files[filename]
+    
+    return generate_file_sidebar_html(), simple_workspace_files.get(current_workspace_file, "")
+
+def create_new_workspace_file(filename: str):
+    """Create new file in workspace - supports .py, .txt, .md"""
+    global current_workspace_file
+    
+    if not filename:
+        filename = f"untitled_{datetime.now().strftime('%H%M%S')}.py"
+    
+    # Add extension if missing
+    if '.' not in filename:
+        filename += '.py'
+    
+    # Create content based on file type
+    if filename.endswith('.py'):
+        new_content = f"""# {filename}
+# Created at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+def main():
+    print("Hello from {filename}!")
+    # Your code here
+    pass
+
+if __name__ == "__main__":
+    main()"""
+    elif filename.endswith('.txt'):
+        new_content = f"""{filename}
+Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Your text content here...
+
+Features:
+- Simple text file
+- Easy to edit
+- No syntax highlighting needed
+"""
+    elif filename.endswith('.md'):
+        base_name = filename.replace('.md', '').replace('_', ' ').title()
+        new_content = f"""# {base_name}
+
+> Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+## Overview
+
+This is a markdown file for documentation.
+
+## Features
+
+- **Bold text**
+- *Italic text*
+- `Code blocks`
+- Lists
+
+## Code Example
+
+```python
+def hello():
+    print("Hello from markdown!")
+```
+
+## TODO
+
+- [ ] Add more content
+- [ ] Review and update
+- [ ] Share with team
+"""
+    else:
+        # Default to text content
+        new_content = f"""File: {filename}
+Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Content goes here...
+"""
+    
+    simple_workspace_files[filename] = new_content
+    current_workspace_file = filename
+    
+    # Return updated sidebar and content
+    return generate_file_sidebar_html(), new_content
+
+# === LIVE AI AGENT FUNCTIONS ===
+def ai_agent_chat(message: str, history: list, current_file: str, current_code: str):
+    """Live AI agent with full project context - Cursor-style"""
+    try:
+        # Build project context
+        project_files = []
+        for filename, content in simple_workspace_files.items():
+            file_preview = content[:200] + "..." if len(content) > 200 else content
+            project_files.append(f"{filename}:\n{file_preview}")
+        
+        project_context = "\n\n".join(project_files)
+        
+        # Force CHAT mode - add chat keywords to bypass GraphAgent CODE detection
+        chat_message = f"merhaba, {message}"  # Force CHAT intent
+        
+        context_prompt = f"""Sen yardımcı bir AI'sın. Kısa sohbet et.
+
+Dosyalar: {', '.join(simple_workspace_files.keys())}
+Açık: {current_file}
+
+Kullanıcı: {message}
+
+Kısa cevap ver."""
+
+        # Use ChatGroq directly for simple chat (bypass GraphAgent code execution)
+        try:
+            from langchain_groq import ChatGroq
+            from config import settings
+            
+            chat_llm = ChatGroq(
+                temperature=0.7,
+                model_name=settings.AGENT_MODEL_NAME,
+                groq_api_key=settings.GROQ_API_KEY,
+                max_tokens=500
+            )
+            
+            response = chat_llm.invoke(context_prompt)
+            ai_response = response.content.strip()
+            
+        except Exception as e:
+            ai_response = f"Merhaba! VS Code workspace'de size nasıl yardım edebilirim? 🤖\n\n(Chat hatası: {str(e)})"
+        
+        # Add to history in correct format
+        history.append([message, ai_response])
+        
+        return history, ""
+        
+    except Exception as e:
+        error_response = f"❌ Özür dilerim, bir hata oluştu: {str(e)}"
+        history.append([message, error_response])
+        return history, ""
+
+def ai_create_function(current_code: str, filename: str):
+    """AI creates new function based on current context"""
+    try:
+        prompt = f"""Mevcut dosya: {filename}
+Mevcut kod:
+```python
+{current_code}
+```
+
+Bu koda uygun yeni bir fonksiyon ekle. Kod tarzını koru ve yararlı bir fonksiyon yaz.
+Sadece güncellenmiş Python kodunu döndür."""
+
+        result = graph_agent.run(prompt)
+        improved_code = result.get("result", current_code)
+        
+        # Extract code if wrapped in markdown
+        if "```python" in improved_code:
+            start = improved_code.find("```python") + 9
+            end = improved_code.find("```", start)
+            if end != -1:
+                improved_code = improved_code[start:end].strip()
+        
+        # Update workspace
+        simple_workspace_files[filename] = improved_code
+        
+        return improved_code
+        
+    except Exception as e:
+        return f"# AI Create Error: {str(e)}\n{current_code}"
+
+def ai_improve_current_code(current_code: str, filename: str):
+    """AI improves current code"""
+    try:
+        prompt = f"""Bu Python kodunu geliştir ve optimize et:
+
+```python
+{current_code}
+```
+
+Geliştirmeler:
+- Performans optimizasyonu
+- Hata kontrolü ekleme
+- Kod okunabilirliği
+- Best practices
+
+Sadece geliştirilmiş Python kodunu döndür."""
+
+        result = graph_agent.run(prompt)
+        improved_code = result.get("result", current_code)
+        
+        # Extract code if wrapped in markdown
+        if "```python" in improved_code:
+            start = improved_code.find("```python") + 9
+            end = improved_code.find("```", start)
+            if end != -1:
+                improved_code = improved_code[start:end].strip()
+        
+        # Update workspace
+        simple_workspace_files[filename] = improved_code
+        
+        return improved_code
+        
+    except Exception as e:
+        return f"# AI Improve Error: {str(e)}\n{current_code}"
+
+def ai_debug_current_code(current_code: str, filename: str):
+    """AI debugs current code"""
+    try:
+        prompt = f"""Bu Python kodundaki hataları bul ve düzelt:
+
+```python
+{current_code}
+```
+
+Potansiyel sorunlar:
+- Syntax hataları
+- Logic hataları  
+- Exception handling
+- Edge cases
+
+Sadece düzeltilmiş Python kodunu döndür."""
+
+        result = graph_agent.run(prompt)
+        debugged_code = result.get("result", current_code)
+        
+        # Extract code if wrapped in markdown
+        if "```python" in debugged_code:
+            start = debugged_code.find("```python") + 9
+            end = debugged_code.find("```", start)
+            if end != -1:
+                debugged_code = debugged_code[start:end].strip()
+        
+        # Update workspace
+        simple_workspace_files[filename] = debugged_code
+        
+        return debugged_code
+        
+    except Exception as e:
+        return f"# AI Debug Error: {str(e)}\n{current_code}"
 
 def execute_quick_command(command: str):
     """Quick command'ları GraphAgent ile çalıştırır"""
@@ -796,13 +1299,49 @@ vscode_theme_css = """
 }
 
 /* VS Code Terminal Styling */
-.vscode-terminal textarea {
+.vscode-terminal textarea, .terminal-output textarea {
     background-color: #0c0c0c !important;
     color: #cccccc !important;
     border: none !important;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace !important;
     font-size: 13px !important;
     line-height: 1.2 !important;
+}
+
+/* Seamless workspace layout */
+.gradio-column {
+    background: transparent !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.gradio-row {
+    margin: 0 !important;
+    padding: 0 !important;
+    gap: 1px !important;
+}
+
+/* Remove all container padding */
+.gradio-container {
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* File operations styling */
+.gradio-dropdown select {
+    background-color: #2d2d30 !important;
+    border: 1px solid #3c3c3c !important;
+    color: #cccccc !important;
+}
+
+/* Ultra-compact spacing */
+.gradio-block {
+    margin: 0 !important;
+    padding: 0 !important;
+}
+
+.gradio-form {
+    gap: 2px !important;
 }
 
 /* VS Code Button Styling */
@@ -1156,6 +1695,39 @@ with gr.Blocks(
             </div>
             """)
 
+        # TAB 4: VS Code Perfect Layout
+        with gr.TabItem("🔍 Debug Workspace"):
+            with gr.Row():
+                # Sol panel - File listesi
+                with gr.Column(scale=1):
+                    gr.Markdown("### 📁 Generated Files")
+                    file_list = gr.Dropdown(
+                        choices=[],
+                        label="Select File",
+                        interactive=True
+                    )
+                    refresh_files_btn = gr.Button("🔄 Refresh Files")
+                    
+                # Sağ panel - Kod görüntüleyici  
+                with gr.Column(scale=3):
+                    gr.Markdown("### 📝 File Content")
+                    file_viewer = gr.Code(
+                        language="python",
+                        lines=25,
+                        interactive=False,
+                        show_label=False
+                    )
+            
+            # Alt panel - Agent logs
+            with gr.Row():
+                agent_debug_logs = gr.Textbox(
+                    label="🤖 Agent Debug Logs",
+                    lines=8,
+                    max_lines=15,
+                    interactive=False,
+                    placeholder="Agent çalışma logları burada görünecek..."
+                )
+
     # Event handlers
     # GraphAgent ile senkron çalışan event handler'lar  
     inputs = [user_input, chatbot, agent_logs]
@@ -1207,6 +1779,18 @@ with gr.Blocks(
         outputs=[file_explorer, code_editor, current_file_tab]
     )
     
+    # Debug Workspace event handlers
+    refresh_files_btn.click(
+        fn=refresh_file_list,
+        outputs=[file_list]
+    )
+    
+    file_list.change(
+        fn=load_file_content,
+        inputs=[file_list],
+        outputs=[file_viewer]
+    )
+    
     clear_terminal_btn.click(
         fn=clear_terminal_output,
         outputs=[terminal_output]
@@ -1249,6 +1833,7 @@ with gr.Blocks(
         inputs=[code_editor],
         outputs=[code_editor]
     )
+    
     
     # Add CSS for better VS Code integration
     demo.load(

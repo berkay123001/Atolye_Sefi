@@ -27,6 +27,9 @@ base_image = modal.Image.debian_slim().pip_install([
     "opencv-python", "seaborn", "plotly", "jupyter"
 ])
 
+# Workspace volume for persistent file storage
+workspace_volume = modal.Volume.from_name("atolye-workspace", create_if_missing=True)
+
 # LOCAL DEVELOPMENT: Direct execution without serve mode
 def execute_code_locally(code: str, use_gpu: bool = False) -> Dict[str, Any]:
     """Local development version - executes code directly"""
@@ -153,6 +156,96 @@ def execute_gpu_code(code: str, requirements: Optional[List[str]] = None) -> Dic
     finally:
         sys.stdout = old_stdout
         sys.stderr = old_stderr
+
+# Workspace file management functions
+@app.function(
+    timeout=120,
+    image=base_image,
+    volumes={"/workspace": workspace_volume}
+)
+def save_generated_code(filename: str, content: str) -> Dict[str, Any]:
+    """Save generated code to workspace volume"""
+    try:
+        with open(f"/workspace/{filename}", "w", encoding="utf-8") as f:
+            f.write(content)
+        
+        # Commit changes to volume
+        workspace_volume.commit()
+        
+        return {
+            "status": "success",
+            "message": f"✅ {filename} saved to workspace",
+            "filename": filename
+        }
+    except Exception as e:
+        return {
+            "status": "error", 
+            "message": f"❌ Failed to save {filename}: {str(e)}"
+        }
+
+@app.function(
+    timeout=60,
+    image=base_image,
+    volumes={"/workspace": workspace_volume}
+)
+def list_workspace_files() -> Dict[str, Any]:
+    """List all files in workspace"""
+    try:
+        import os
+        files = []
+        
+        if os.path.exists("/workspace"):
+            for item in os.listdir("/workspace"):
+                item_path = os.path.join("/workspace", item)
+                if os.path.isfile(item_path):
+                    with open(item_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    files.append({
+                        "name": item,
+                        "content": content,
+                        "size": len(content)
+                    })
+        
+        return {
+            "status": "success",
+            "files": files,
+            "count": len(files)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to list files: {str(e)}",
+            "files": []
+        }
+
+@app.function(
+    timeout=60,
+    image=base_image,
+    volumes={"/workspace": workspace_volume}
+)
+def get_workspace_file(filename: str) -> Dict[str, Any]:
+    """Get specific file content from workspace"""
+    try:
+        file_path = f"/workspace/{filename}"
+        if not os.path.exists(file_path):
+            return {
+                "status": "error",
+                "message": f"File {filename} not found"
+            }
+        
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        
+        return {
+            "status": "success",
+            "filename": filename,
+            "content": content
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Failed to read {filename}: {str(e)}"
+        }
 
 @app.function(
     timeout=600,

@@ -3,7 +3,7 @@
 import sys
 import os
 import operator
-from typing import TypedDict, Annotated, List, Dict, Any
+from typing import TypedDict, Annotated, List, Dict, Any, Optional
 
 # Projenin ana dizinini Python'un yoluna ekliyoruz.
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -19,9 +19,11 @@ from langchain_core.prompts import ChatPromptTemplate
 from config import settings
 from tools.architectural_tools import decide_architecture
 from tools.operational_tools import start_task_on_pod
+# 🔥 NEW: Context awareness tools
+from tools.context_tools import project_context, get_project_context_summary, search_project_files
 
 
-# 1. Yeni "Beyaz Tahta" (AgentState) - Çok Adımlı Hafıza + Akıllı Yönlendirme
+# 1. Enhanced "Beyaz Tahta" (AgentState) - Multi-Step Memory + Context Awareness
 class AgentState(TypedDict):
     input: str                          # Kullanıcının orijinal görevi
     route_decision: str                 # Yönlendirme kararı: "chat" veya "task"
@@ -29,6 +31,11 @@ class AgentState(TypedDict):
     executed_steps: Annotated[List[Dict], operator.add]  # Tamamlanan adımların sonuçları
     current_step_index: int             # Şu anki adım numarası
     final_result: str                   # Nihai cevap
+    # 🔥 NEW: GitHub Copilot-level context awareness
+    project_context: Optional[str]      # Project structure and context summary
+    relevant_files: List[str]           # Files relevant to current task
+    context_loaded: bool                # Whether context has been loaded
+    error_count: int                    # Track errors for adaptive replanning
 
 
 # 2. Çok Adımlı Proje Yöneticisi Sınıfı
@@ -51,6 +58,10 @@ class GraphAgent:
             "start_task_on_pod": start_task_on_pod,  # Modal.com serverless executor
             # Modal executor wrapper
             "execute_modal_command": self._execute_modal_command_wrapper,
+            # 🔥 NEW: Context awareness tools
+            "load_project_context": self._load_project_context,
+            "search_files": self._search_files_wrapper,
+            "get_file_context": self._get_file_context_wrapper,
         }
         
         # Grafiği oluştur
@@ -96,6 +107,87 @@ class GraphAgent:
             "message": "Task simulation completed successfully",
             "details": f"Simulated execution with parameters: {kwargs}"
         }
+    
+    # 🔥 NEW: Context awareness methods
+    def _load_project_context(self, **kwargs) -> Dict:
+        """Load complete project context for enhanced awareness"""
+        try:
+            context_summary = get_project_context_summary()
+            return {
+                "status": "success",
+                "message": "Project context loaded successfully",
+                "context": context_summary,
+                "details": "Context includes file structure, dependencies, and architecture"
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Failed to load project context: {str(e)}"
+            }
+    
+    def _search_files_wrapper(self, **kwargs) -> Dict:
+        """Search project files by query"""
+        try:
+            query = kwargs.get("query", "")
+            file_type = kwargs.get("file_type")
+            
+            if not query:
+                return {"status": "error", "message": "Search query required"}
+            
+            results = search_project_files(query, file_type)
+            
+            # Format results for LLM consumption
+            file_summaries = []
+            for file_ctx in results[:10]:  # Limit to top 10 results
+                summary = f"{file_ctx.path} ({file_ctx.file_type}): {file_ctx.content_preview[:100]}..."
+                file_summaries.append(summary)
+            
+            return {
+                "status": "success",
+                "message": f"Found {len(results)} files matching '{query}'",
+                "results": file_summaries,
+                "total_results": len(results)
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"File search failed: {str(e)}"
+            }
+    
+    def _get_file_context_wrapper(self, **kwargs) -> Dict:
+        """Get detailed context for a specific file"""
+        try:
+            file_path = kwargs.get("file_path", "")
+            
+            if not file_path:
+                return {"status": "error", "message": "File path required"}
+            
+            file_ctx = project_context.get_file_context(file_path)
+            
+            if not file_ctx:
+                return {"status": "error", "message": f"File not found: {file_path}"}
+            
+            return {
+                "status": "success",
+                "message": f"File context loaded for {file_path}",
+                "file_info": {
+                    "path": file_ctx.path,
+                    "type": file_ctx.file_type,
+                    "size": file_ctx.size,
+                    "is_code": file_ctx.is_code,
+                    "content_preview": file_ctx.content_preview,
+                    "imports": file_ctx.imports,
+                    "classes": file_ctx.classes,
+                    "functions": file_ctx.functions
+                }
+            }
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Failed to get file context: {str(e)}"
+            }
 
     # === GELIŞMIŞ INTENT CLASSIFIER ===
     def classify_intent(self, user_input: str) -> str:
@@ -335,6 +427,65 @@ class GraphAgent:
 
     # === CHATBOT_STEP REMOVED - NOW HANDLED BY FAST PATH HANDLERS ===
 
+    # 🔥 NEW: CONTEXT LOADING STEP for GitHub Copilot-level awareness
+    def load_context_step(self, state: AgentState) -> Dict:
+        """
+        Load project context for enhanced code assistance
+        Performance: Context loading cached for 5 minutes
+        """
+        print("\n🧠 [CONTEXT LOADING] Loading project context...")
+        
+        try:
+            # Load project context if not already loaded
+            if not state.get("context_loaded", False):
+                context_result = self._load_project_context()
+                
+                if context_result["status"] == "success":
+                    project_context_summary = context_result["context"]
+                    
+                    # Search for files relevant to the user's request
+                    user_input = state["input"].lower()
+                    relevant_files = []
+                    
+                    # Simple relevance detection
+                    keywords = user_input.split()
+                    for keyword in keywords:
+                        if len(keyword) > 3:  # Skip short words
+                            search_results = search_project_files(keyword)
+                            relevant_files.extend([f.path for f in search_results[:3]])
+                    
+                    # Remove duplicates and limit
+                    relevant_files = list(set(relevant_files))[:5]
+                    
+                    return {
+                        "project_context": project_context_summary,
+                        "relevant_files": relevant_files,
+                        "context_loaded": True,
+                        "error_count": state.get("error_count", 0)
+                    }
+                else:
+                    print(f"⚠️ Context loading failed: {context_result['message']}")
+                    return {
+                        "project_context": "Context loading failed",
+                        "relevant_files": [],
+                        "context_loaded": False,
+                        "error_count": state.get("error_count", 0)
+                    }
+            else:
+                # Context already loaded
+                return {
+                    "error_count": state.get("error_count", 0)
+                }
+                
+        except Exception as e:
+            print(f"❌ Context loading error: {e}")
+            return {
+                "project_context": f"Context error: {str(e)}",
+                "relevant_files": [],
+                "context_loaded": False,
+                "error_count": state.get("error_count", 0)
+            }
+
     # === İŞ İSTASYONU 2: YENİ PLANLAMA DÜĞÜMÜ ===
     def plan_step(self, state: AgentState) -> Dict:
         """
@@ -343,9 +494,20 @@ class GraphAgent:
         """
         print("\n🎯 [PLANLAMA DÜĞÜMÜ] Görev analiz ediliyor...")
         
+        # 🔥 NEW: Enhanced planning with project context
+        project_context = state.get("project_context", "")
+        relevant_files = state.get("relevant_files", [])
+        
+        context_info = ""
+        if project_context:
+            context_info = f"\n🧠 PROJECT CONTEXT:\n{project_context}\n"
+        if relevant_files:
+            context_info += f"\n📁 RELEVANT FILES: {', '.join(relevant_files)}\n"
+        
         planning_prompt = ChatPromptTemplate.from_messages([
-            ("system", """Sen, görev tipini analiz eden ve MUTLAKA çalıştırılabilir Python kodu üreten bir AI uzmanısın.
-
+            ("system", f"""Sen, görev tipini analiz eden ve MUTLAKA çalıştırılabilir Python kodu üreten bir AI uzmanısın.
+            GitHub Copilot seviyesinde project awareness'a sahipsin.
+            {context_info}
             GÖREV TİPLERİ:
             1. SIMPLE_PYTHON: Tek satır veya basit Python kodu (print, hesaplama, vb.)
             2. COMPLEX_TASK: Karmaşık görevler (hesap makinesi, script yazma, vb.)
@@ -359,6 +521,12 @@ class GraphAgent:
             - "script yaz" → Tam script kodu
             - "dosya oluştur" → Dosya oluşturma kodu
             - "test.txt dosyası oluştur" → Dosya yazma kodu
+
+            🔥 PROJECT-AWARE FEATURES:
+            - Mevcut dosya yapısını dikkate al
+            - Kullanılan framework'leri tanı (Flask, FastAPI, LangChain, etc.)
+            - Import'ları projeye uygun yap
+            - Mevcut kod stilini taklit et
 
             ÖNEMLİ: HER DURUMDA çalıştırılabilir Python kodu üretmelisin!
 
@@ -748,6 +916,9 @@ calculator()
         # SINGLE ENTRY POINT: Ultra-fast intent router
         workflow.add_node("route_query", self.route_query)
         
+        # 🔥 NEW: Context loading for enhanced awareness
+        workflow.add_node("load_context", self.load_context_step)
+        
         # OPTIMIZED EXECUTION PATH: Only for complex CODE tasks
         workflow.add_node("plan_step", self.plan_step)
         workflow.add_node("execute_step", self.execute_step) 
@@ -763,8 +934,8 @@ calculator()
                 # CHAT/HELP/UNCLEAR/Simple CODE patterns end here
                 return "END"
             elif state.get("route_decision") == "task":
-                # Only complex CODE tasks go to planning
-                return "PLAN"
+                # Complex CODE tasks need context first
+                return "CONTEXT"
             else:
                 # Fallback safety
                 return "END"
@@ -774,9 +945,12 @@ calculator()
             ultra_fast_decision,
             {
                 "END": END,                    # 90% of queries: Direct end
-                "PLAN": "plan_step"           # 10% of queries: Complex CODE
+                "CONTEXT": "load_context"     # 10% of queries: Need context first
             }
         )
+        
+        # Context loading flows to planning
+        workflow.add_edge("load_context", "plan_step")
         
         # STREAMLINED CODE EXECUTION PATH
         workflow.add_edge("plan_step", "execute_step")
@@ -808,7 +982,12 @@ calculator()
             "plan": [],
             "executed_steps": [], 
             "current_step_index": 0,
-            "final_result": ""
+            "final_result": "",
+            # 🔥 NEW: Context awareness fields
+            "project_context": "",
+            "relevant_files": [],
+            "context_loaded": False,
+            "error_count": 0
         }
         
         final_state = self.graph.invoke(initial_state, {"recursion_limit": 50})

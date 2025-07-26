@@ -37,6 +37,33 @@ wandb/
 *.sqlite
 *.sqlite3
 
+# Logs
+logs/
+*.log
+
+# Context cache
+.context_cache.json
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
 # Proje Vizyonu (Gizli)
 PROJECT_VISION.md
 CLAUDE.md
+
+# User generated files
+hesap_makinesi.py
+calculator*.py
+test_*.py
+demo_*.py

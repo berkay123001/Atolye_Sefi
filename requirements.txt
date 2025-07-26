@@ -1,5 +1,6 @@
 langchain
 langchain-groq
+langchain-google-genai
 gradio
 python-dotenv
 pydantic
@@ -9,3 +10,4 @@ black
 langgraph
 requests
 paramiko
+rich==13.7.0

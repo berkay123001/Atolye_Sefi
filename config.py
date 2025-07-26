@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # Modal.com token
     MODAL_TOKEN_ID: str
     
+    # Additional API keys (optional)
+    GOOGLE_API_KEY: str = ""
+    OPENAI_API_KEY: str = ""
+    
     # SSH anahtarı yolu
     RUNPOD_SSH_KEY: str = "/home/berkayhsrt/.ssh/id_ed25519"
     
