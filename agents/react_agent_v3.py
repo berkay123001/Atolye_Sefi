@@ -85,8 +85,17 @@ class ReactAgentV3:
     def _create_file_with_content(self, filename: str, content: str) -> bool:
         """Gerçek dosya oluşturma fonksiyonu"""
         try:
-            # Ensure we're in the correct directory
-            base_dir = "/home/berkayhsrt/Atolye_Sefi"
+            # Detect environment and use appropriate directory
+            if os.path.exists("/workspace/atolye-sefi"):
+                # Modal container environment
+                base_dir = "/workspace/atolye-sefi"
+            elif os.path.exists("/home/berkayhsrt/Atolye_Sefi"):
+                # Local environment
+                base_dir = "/home/berkayhsrt/Atolye_Sefi"
+            else:
+                # Current working directory as fallback
+                base_dir = os.getcwd()
+            
             full_path = os.path.join(base_dir, filename)
             
             with open(full_path, 'w', encoding='utf-8') as f:
