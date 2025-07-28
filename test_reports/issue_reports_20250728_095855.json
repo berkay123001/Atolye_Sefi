@@ -1,0 +1,408 @@
+{
+  "report_metadata": {
+    "generation_time": "2025-07-28T09:58:55.881277",
+    "total_issues": 19,
+    "severity_breakdown": {
+      "CRITICAL": 5,
+      "HIGH": 9,
+      "MEDIUM": 5,
+      "LOW": 0
+    },
+    "category_breakdown": {
+      "gemini_enhanced_testing": 3,
+      "error_recovery_system": 3,
+      "security_analysis": 3,
+      "ml_workflow_testing": 2,
+      "collaborative_development": 3,
+      "enhanced_file_operations": 5
+    }
+  },
+  "issues": [
+    {
+      "issue_id": "ISSUE_20250728_095854_000",
+      "category": "gemini_enhanced_testing",
+      "severity": "HIGH",
+      "title": "Test Failure: Gemini test senaryosu oluşturma",
+      "description": "Test failed for input: 'gemini ile test senaryosu oluştur'",
+      "test_input": "gemini ile test senaryosu oluştur",
+      "expected_behavior": "Success",
+      "actual_behavior": "🤔 **Anlayamadım, ama yardım edebilirim!**\n\n⚡ **Hızlı Başlangıç:**\n• `\"Hello World yazdır\"` → Kod çalıştırma\n• `\"2+2 hesapla\"` → Hızlı matematik\n• `\"neler yapabilirsin\"` → Tüm yeteneklerim\n\n🎯 **Popüler...",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Gemini API key'ini kontrol et",
+        "Gemini model response parsing'i düzelt",
+        "Test scenario generation logic'ini gözden geçir",
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:54.871797",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095854_001",
+      "category": "gemini_enhanced_testing",
+      "severity": "HIGH",
+      "title": "Test Failure: Gemini karmaşık problem çözme",
+      "description": "Test failed for input: 'karmaşık python problemi çöz'",
+      "test_input": "karmaşık python problemi çöz",
+      "expected_behavior": "Success",
+      "actual_behavior": "'karmaşık python problemi çöz' komutunu çalıştırmaya çalıştım ama bazı sorunlar oldu. Detayları kontrol edeyim ve tekrar deneyebiliriz. 🔧",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Gemini API key'ini kontrol et",
+        "Gemini model response parsing'i düzelt",
+        "Test scenario generation logic'ini gözden geçir",
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:54.898436",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095854_002",
+      "category": "gemini_enhanced_testing",
+      "severity": "HIGH",
+      "title": "Test Failure: Gemini kod kalitesi analizi",
+      "description": "Test failed for input: 'kod kalitesi analizi yap'",
+      "test_input": "kod kalitesi analizi yap",
+      "expected_behavior": "Success",
+      "actual_behavior": "🤔 **Anlayamadım, ama yardım edebilirim!**\n\n⚡ **Hızlı Başlangıç:**\n• `\"Hello World yazdır\"` → Kod çalıştırma\n• `\"2+2 hesapla\"` → Hızlı matematik\n• `\"neler yapabilirsin\"` → Tüm yeteneklerim\n\n🎯 **Popüler...",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Gemini API key'ini kontrol et",
+        "Gemini model response parsing'i düzelt",
+        "Test scenario generation logic'ini gözden geçir",
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:54.899066",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095854_003",
+      "category": "error_recovery_system",
+      "severity": "HIGH",
+      "title": "Test Failure: Syntax hatası kurtarma",
+      "description": "Test failed for input: 'bozuk kod dosyası düzelt'",
+      "test_input": "bozuk kod dosyası düzelt",
+      "expected_behavior": "Success",
+      "actual_behavior": "🤔 **Anlayamadım, ama yardım edebilirim!**\n\n⚡ **Hızlı Başlangıç:**\n• `\"Hello World yazdır\"` → Kod çalıştırma\n• `\"2+2 hesapla\"` → Hızlı matematik\n• `\"neler yapabilirsin\"` → Tüm yeteneklerim\n\n🎯 **Popüler...",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Error detection algoritmasını iyileştir",
+        "Auto-fix mechanisms'leri implement et",
+        "Error handling robustness'ı artır",
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:54.899622",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095854_004",
+      "category": "error_recovery_system",
+      "severity": "HIGH",
+      "title": "Test Failure: Eksik import kurtarma",
+      "description": "Test failed for input: 'eksik import'ları bul ve ekle'",
+      "test_input": "eksik import'ları bul ve ekle",
+      "expected_behavior": "Success",
+      "actual_behavior": "'eksik import'ları bul ve ekle' komutunu çalıştırmaya çalıştım ama bazı sorunlar oldu. Detayları kontrol edeyim ve tekrar deneyebiliriz. 🔧",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Error detection algoritmasını iyileştir",
+        "Auto-fix mechanisms'leri implement et",
+        "Error handling robustness'ı artır",
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:54.920952",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095854_005",
+      "category": "error_recovery_system",
+      "severity": "HIGH",
+      "title": "Test Failure: Runtime hata kurtarma",
+      "description": "Test failed for input: 'runtime hatası çöz'",
+      "test_input": "runtime hatası çöz",
+      "expected_behavior": "Success",
+      "actual_behavior": "'runtime hatası çöz' komutunu çalıştırmaya çalıştım ama bazı sorunlar oldu. Detayları kontrol edeyim ve tekrar deneyebiliriz. 🔧",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Error detection algoritmasını iyileştir",
+        "Auto-fix mechanisms'leri implement et",
+        "Error handling robustness'ı artır",
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:54.933426",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095854_006",
+      "category": "security_analysis",
+      "severity": "HIGH",
+      "title": "Test Failure: Güvenlik açığı tarama",
+      "description": "Test failed for input: 'güvenlik açığı tara'",
+      "test_input": "güvenlik açığı tara",
+      "expected_behavior": "Success",
+      "actual_behavior": "🤔 **Anlayamadım, ama yardım edebilirim!**\n\n⚡ **Hızlı Başlangıç:**\n• `\"Hello World yazdır\"` → Kod çalıştırma\n• `\"2+2 hesapla\"` → Hızlı matematik\n• `\"neler yapabilirsin\"` → Tüm yeteneklerim\n\n🎯 **Popüler...",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:54.935605",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095854_007",
+      "category": "security_analysis",
+      "severity": "HIGH",
+      "title": "Test Failure: Kod güvenliği analizi",
+      "description": "Test failed for input: 'kod güvenliği analizi'",
+      "test_input": "kod güvenliği analizi",
+      "expected_behavior": "Success",
+      "actual_behavior": "🤔 **Anlayamadım, ama yardım edebilirim!**\n\n⚡ **Hızlı Başlangıç:**\n• `\"Hello World yazdır\"` → Kod çalıştırma\n• `\"2+2 hesapla\"` → Hızlı matematik\n• `\"neler yapabilirsin\"` → Tüm yeteneklerim\n\n🎯 **Popüler...",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:54.936089",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095854_008",
+      "category": "security_analysis",
+      "severity": "HIGH",
+      "title": "Test Failure: Güvenlik önerileri",
+      "description": "Test failed for input: 'güvenli kod yazmak için öneriler'",
+      "test_input": "güvenli kod yazmak için öneriler",
+      "expected_behavior": "Success",
+      "actual_behavior": "'güvenli kod yazmak için öneriler' komutunu çalıştırmaya çalıştım ama bazı sorunlar oldu. Detayları kontrol edeyim ve tekrar deneyebiliriz. 🔧",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:54.956264",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095855_009",
+      "category": "ml_workflow_testing",
+      "severity": "MEDIUM",
+      "title": "Test Failure: Veri analizi raporu",
+      "description": "Test failed for input: 'veri analizi raporu hazırla'",
+      "test_input": "veri analizi raporu hazırla",
+      "expected_behavior": "Success",
+      "actual_behavior": "🤔 **Anlayamadım, ama yardım edebilirim!**\n\n⚡ **Hızlı Başlangıç:**\n• `\"Hello World yazdır\"` → Kod çalıştırma\n• `\"2+2 hesapla\"` → Hızlı matematik\n• `\"neler yapabilirsin\"` → Tüm yeteneklerim\n\n🎯 **Popüler...",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:55.807205",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095855_010",
+      "category": "ml_workflow_testing",
+      "severity": "MEDIUM",
+      "title": "Test Failure: Model performans değerlendirme",
+      "description": "Test failed for input: 'model performansını değerlendir'",
+      "test_input": "model performansını değerlendir",
+      "expected_behavior": "Success",
+      "actual_behavior": "🤔 **Anlayamadım, ama yardım edebilirim!**\n\n⚡ **Hızlı Başlangıç:**\n• `\"Hello World yazdır\"` → Kod çalıştırma\n• `\"2+2 hesapla\"` → Hızlı matematik\n• `\"neler yapabilirsin\"` → Tüm yeteneklerim\n\n🎯 **Popüler...",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:55.808474",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095855_011",
+      "category": "collaborative_development",
+      "severity": "MEDIUM",
+      "title": "Test Failure: Kod review",
+      "description": "Test failed for input: 'kod review yap'",
+      "test_input": "kod review yap",
+      "expected_behavior": "Success",
+      "actual_behavior": "🤔 **Anlayamadım, ama yardım edebilirim!**\n\n⚡ **Hızlı Başlangıç:**\n• `\"Hello World yazdır\"` → Kod çalıştırma\n• `\"2+2 hesapla\"` → Hızlı matematik\n• `\"neler yapabilirsin\"` → Tüm yeteneklerim\n\n🎯 **Popüler...",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:55.809628",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095855_012",
+      "category": "collaborative_development",
+      "severity": "MEDIUM",
+      "title": "Test Failure: Git commit mesajı oluşturma",
+      "description": "Test failed for input: 'git commit mesajı oluştur'",
+      "test_input": "git commit mesajı oluştur",
+      "expected_behavior": "Success",
+      "actual_behavior": "🤔 **Anlayamadım, ama yardım edebilirim!**\n\n⚡ **Hızlı Başlangıç:**\n• `\"Hello World yazdır\"` → Kod çalıştırma\n• `\"2+2 hesapla\"` → Hızlı matematik\n• `\"neler yapabilirsin\"` → Tüm yeteneklerim\n\n🎯 **Popüler...",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:55.810717",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095855_013",
+      "category": "collaborative_development",
+      "severity": "MEDIUM",
+      "title": "Test Failure: Dokümantasyon oluşturma",
+      "description": "Test failed for input: 'dokümantasyon yaz'",
+      "test_input": "dokümantasyon yaz",
+      "expected_behavior": "Success",
+      "actual_behavior": "🤔 **Anlayamadım, ama yardım edebilirim!**\n\n⚡ **Hızlı Başlangıç:**\n• `\"Hello World yazdır\"` → Kod çalıştırma\n• `\"2+2 hesapla\"` → Hızlı matematik\n• `\"neler yapabilirsin\"` → Tüm yeteneklerim\n\n🎯 **Popüler...",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:55.811762",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095855_014",
+      "category": "enhanced_file_operations",
+      "severity": "CRITICAL",
+      "title": "Test Failure: Basic file reading test",
+      "description": "Test failed for input: 'dosya oku test.txt'",
+      "test_input": "dosya oku test.txt",
+      "expected_behavior": "Success",
+      "actual_behavior": "📄 **Dosya İçeriği (test.txt):**\n```\nHello, Enhanced File Operations!\n\n```",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:55.828345",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095855_015",
+      "category": "enhanced_file_operations",
+      "severity": "CRITICAL",
+      "title": "Test Failure: File copy operation test",
+      "description": "Test failed for input: 'dosya kopyala source.txt destination.txt'",
+      "test_input": "dosya kopyala source.txt destination.txt",
+      "expected_behavior": "Success",
+      "actual_behavior": "❌ **Hata:** File not found: Source file does not exist: source.txt",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:55.842079",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095855_016",
+      "category": "enhanced_file_operations",
+      "severity": "CRITICAL",
+      "title": "Test Failure: Real-time directory monitoring test",
+      "description": "Test failed for input: 'klasör izle ./test_folder değişiklikleri göster'",
+      "test_input": "klasör izle ./test_folder değişiklikleri göster",
+      "expected_behavior": "Success",
+      "actual_behavior": "❌ **Hata:** watchdog library not available",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:55.842707",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095855_017",
+      "category": "enhanced_file_operations",
+      "severity": "CRITICAL",
+      "title": "Test Failure: Bulk file operations performance test",
+      "description": "Test failed for input: '100 dosyayı ./source'dan ./backup'a kopyala'",
+      "test_input": "100 dosyayı ./source'dan ./backup'a kopyala",
+      "expected_behavior": "Success",
+      "actual_behavior": "❌ **Hata:** File not found: Source directory does not exist: ./source",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:55.843376",
+      "status": "OPEN"
+    },
+    {
+      "issue_id": "ISSUE_20250728_095855_018",
+      "category": "enhanced_file_operations",
+      "severity": "CRITICAL",
+      "title": "Test Failure: File move operation test",
+      "description": "Test failed for input: 'dosya taşı ./old/file.txt ./new/location/'",
+      "test_input": "dosya taşı ./old/file.txt ./new/location/",
+      "expected_behavior": "Success",
+      "actual_behavior": "❌ **Hata:** File not found: Source does not exist: ./old/file.txt",
+      "error_trace": null,
+      "suggested_fixes": [
+        "Test case validation logic'ini gözden geçir",
+        "Response parsing accuracy'sini artır",
+        "Error logging mechanisms'leri ekle"
+      ],
+      "claude_analysis": null,
+      "timestamp": "2025-07-28T09:58:55.881261",
+      "status": "OPEN"
+    }
+  ],
+  "fix_recommendations": [
+    "Claude Code integration'ı için API wrapper'ları geliştir",
+    "Gemini response parsing'i için robust error handling ekle",
+    "Test evaluation criteria'larını daha spesifik hale getir",
+    "Automated fix suggestions için AI model entegrasyonu ekle",
+    "Real-time issue tracking dashboard oluştur"
+  ]
+}

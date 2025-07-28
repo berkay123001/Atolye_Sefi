@@ -439,3 +439,89 @@ def get_pod_status(pod_id: str) -> Dict:
         "status": "error",
         "message": f"Pod '{pod_id}' bulunamadı"
     }
+
+# --- Local Python Execution Tool ---
+
+class ExecuteLocalPythonInput(BaseModel):
+    python_code: str = Field(description="Python kodu çalıştırılacak")
+
+@tool(args_schema=ExecuteLocalPythonInput)
+def execute_local_python(python_code: str) -> Dict[str, Any]:
+    """
+    Python kodunu local ortamda güvenli şekilde çalıştırır.
+    Modal.com'a bağımlılık olmadan lokal execution sağlar.
+    """
+    print(f"\n[Local Executor] Python kodu çalıştırılıyor...")
+    print(f"[Local Executor] Kod: {python_code[:100]}{'...' if len(python_code) > 100 else ''}")
+    
+    import subprocess
+    import tempfile
+    import os
+    
+    try:
+        # Geçici dosya oluştur
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as f:
+            f.write(python_code)
+            temp_file = f.name
+        
+        # Python kodunu çalıştır
+        process = subprocess.run(
+            [sys.executable, temp_file], 
+            capture_output=True, 
+            text=True, 
+            timeout=30,  # 30 saniye timeout
+            cwd=os.getcwd()  # Mevcut dizinde çalıştır
+        )
+        
+        # Geçici dosyayı temizle
+        os.unlink(temp_file)
+        
+        result = {
+            "status": "success" if process.returncode == 0 else "error",
+            "exit_code": process.returncode,
+            "output": process.stdout,
+            "error": process.stderr,
+            "execution_method": "Local Python",
+            "execution_time": "< 30s"
+        }
+        
+        if result["status"] == "success":
+            print(f"[Local Executor] ✅ Başarılı: {len(result['output'])} karakter çıktı")
+        else:
+            print(f"[Local Executor] ❌ Hata: {result['error'][:100]}")
+        
+        return result
+        
+    except subprocess.TimeoutExpired:
+        # Geçici dosyayı temizle
+        if 'temp_file' in locals():
+            try:
+                os.unlink(temp_file)
+            except:
+                pass
+        
+        return {
+            "status": "error",
+            "exit_code": -1,
+            "output": "",
+            "error": "Kod çalıştırma 30 saniye içinde tamamlanamadı (timeout)",
+            "execution_method": "Local Python (Timeout)",
+            "execution_time": "> 30s"
+        }
+        
+    except Exception as e:
+        # Geçici dosyayı temizle
+        if 'temp_file' in locals():
+            try:
+                os.unlink(temp_file)
+            except:
+                pass
+        
+        return {
+            "status": "error",
+            "exit_code": -1,
+            "output": "",
+            "error": f"Local execution hatası: {str(e)}",
+            "execution_method": "Local Python (Error)",
+            "execution_time": "N/A"
+        }
