@@ -319,7 +319,16 @@ class GraphAgent:
         if not input_lower:
             return "UNCLEAR"
         
-        # HELP keywords - Capability questions (HIGHEST PRIORITY)
+        # CHAT keywords - Greetings and simple questions (HIGHEST PRIORITY - FIX!)
+        chat_patterns = [
+            "merhaba", "selam", "hello", "hi", "hey", "nasılsın", 
+            "orda mısın", "burada mısın", "naber", "slm", "kimsin",
+            "adın ne", "ne yapıyorsun"
+        ]
+        if any(pattern in input_lower for pattern in chat_patterns):
+            return "CHAT"
+        
+        # HELP keywords - Capability questions (HIGH PRIORITY)
         help_patterns = [
             "neler yapabilir", "ne yapabilir", "hangi özelliklerin var",
             "komutlar", "özellik", "yardım", "nasıl kullan", "ne için",
