@@ -238,6 +238,42 @@ Herhangi bir araçtan (Gözlem) veri aldığında, bu veriyi MUTLAKA hafızaya (
 🏆 ALTIN KURAL #2: TÜM CEVAPLARIN TÜRKÇE OLMALI - MUTLAK!
 'Thought' adımların dahil, tüm düşünce sürecin ve nihai cevapların MUTLAKA Türkçe olmalıdır. Bu kuralı asla ihlal etme. İngilizce düşünme yasak!
 
+🏆 ALTIN KURAL #3 (KRİTİK): FINAL ANSWER JSON KURALI - MUTLAK!
+Görevi başarıyla tamamladığında 'final_answer' aracını kullanmalısın. Bu aracı kullanırken 'answer' alanının içeriği, **kesinlikle** tek bir metin bloğu (string) olmalıdır. Metni oluştururken Python'daki gibi `+` operatörleri veya başka birleştirme yöntemleri KULLANMA. Tüm metni, Markdown formatında, tek bir seferde oluştur.
+
+**DOĞRU KULLANIM ÖRNEĞİ:**
+```json
+{
+    "tool": "final_answer",
+    "tool_input": {
+        "answer": "Görev başarıyla tamamlandı.\\n\\n# Özet\\n- Dosya analizi yapıldı\\n- Kod kalitesi kontrol edildi\\n\\nHer şey yolunda."
+    }
+}
+```
+
+**YANLIŞ KULLANIM ÖRNEKLERİ (YASAK):**
+```json
+{
+    "tool": "final_answer", 
+    "tool_input": {
+        "answer": "Multi-line
+        string yasak"
+    }
+}
+```
+
+```json
+{
+    "tool": "final_answer", 
+    "tool_input": {
+        "answer": "String concatenation" +
+                  " da yasak"
+    }
+}
+```
+
+**ÖNEMLİ:** Final Answer'daki "answer" değeri tek satırda, tüm line break'ler `\\n` ile escape edilmiş şekilde yazılmalıdır.
+
 **SCRATCHPAD HAFIZA SİSTEMİ:**
 - `scratchpad['last_file_list']` - Son dosya listesi (list_files_recursive'den)
 - `scratchpad['last_git_status']` - Son git durumu (get_git_status'dan)  
@@ -447,16 +483,46 @@ class ReactAgent:
         for emoji in emoji_chars:
             clean_json = clean_json.replace(emoji, '')
         
-        # 2.3: JSON string içindeki tırnak sorunlarını çöz
-        if '"code":' in clean_json and 'scratchpad[' in clean_json:
-            # 1. String içindeki \' escape dizilerini düzelt
-            if r"\.py\'" in clean_json or r"\'.py" in clean_json:
-                # Python dosya uzantısı aramalarında escape sorununu çöz
-                clean_json = clean_json.replace(r"\.py\'", ".py'")
-                clean_json = clean_json.replace(r"\'", "'")
+        # 2.3: JSON string içindeki line break ve tırnak sorunlarını çöz
+        if '"code":' in clean_json:
+            # 1. Multi-line code string'leri tek satıra çevir
+            # Python kodu içindeki gerçek line break'leri \n ile değiştir
+            lines = clean_json.split('\n')
+            if len(lines) > 1:
+                # İlk satırda "code": varsa, multi-line string başlıyor
+                inside_code = False
+                fixed_lines = []
+                code_content = []
+                
+                for line in lines:
+                    if '"code":' in line and not line.strip().endswith('"'):
+                        inside_code = True
+                        code_start = line.split('"code":')[0] + '"code": "'
+                        code_line = line.split('"code":')[1].strip(' "')
+                        if code_line:
+                            code_content.append(code_line)
+                    elif inside_code and line.strip().endswith('"'):
+                        # Son satır
+                        final_code = line.strip(' "')
+                        if final_code:
+                            code_content.append(final_code)
+                        # Birleştir
+                        combined_code = '\\n'.join(code_content)
+                        fixed_lines.append(code_start + combined_code + '"')
+                        inside_code = False
+                        code_content = []
+                    elif inside_code:
+                        # Ortadaki satırlar
+                        code_content.append(line)
+                    else:
+                        fixed_lines.append(line)
+                
+                if not inside_code:  # Başarıyla işlendi
+                    clean_json = '\n'.join(fixed_lines)
             
-            # 2. Double quote'ları normal hale getir
-            clean_json = re.sub(r'scratchpad\s*\[\s*"([^"]+)"\s*\]', r"scratchpad['\1']", clean_json)
+            # 2. Scratchpad tırnak sorunlarını düzelt
+            if 'scratchpad[' in clean_json:
+                clean_json = re.sub(r'scratchpad\s*\[\s*"([^"]+)"\s*\]', r"scratchpad['\1']", clean_json)
         
         # 2.4: Satır sonu düzenleme
         clean_json = clean_json.replace('\r\n', '\n').replace('\r', '\n')
@@ -720,8 +786,31 @@ scratchpad = {scratchpad_json}
                 # LLM'den cevap al - Dayanıklılık katmanı ile
                 response_text = self._invoke_llm_with_retry(messages)
                 
-                # Response'u parse et
-                thought, action = self.parse_llm_response(response_text)
+                # Response'u parse et - KENDİ KENDİNİ DÜZELTME SİSTEMİ
+                try:
+                    thought, action = self.parse_llm_response(response_text)
+                except Exception as parse_error:
+                    # JSON parse hatası - Agent'a hata bildirimi yap
+                    print(f"🔧 JSON Parse Hatası - Kendi kendini düzeltme devreye giriyor...")
+                    print(f"🔍 Hata: {parse_error}")
+                    
+                    # Yapay gözlem oluştur - Agent'a neyin yanlış gittiğini bildir
+                    error_observation = f"""🔧 **System Error Feedback**: My previous action contained invalid JSON syntax. 
+
+**Error Details**: {str(parse_error)}
+
+**What I should fix**: 
+- Check my JSON syntax carefully
+- Ensure proper quote escaping in multi-line strings
+- Use simpler approach if needed
+
+**Next Step**: I should retry with corrected syntax."""
+                    
+                    # Bu hatayı bir sonraki döngüye gözlem olarak aktar
+                    messages.append(HumanMessage(content=f"Observation: {error_observation}"))
+                    
+                    # Bu döngüyü atla, bir sonraki iterasyonda düzeltilmiş yanıt gelsin
+                    continue
                 
                 # Düşünceyi göster
                 print(f"🧠 Düşünce: {thought}")

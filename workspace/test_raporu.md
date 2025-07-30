@@ -1,22 +1,22 @@
-# Atölye Şefi Mezuniyet Testi Raporu
+# Proje Durumu Özet
 
-## Proje Analizi
+## Dosya Yapısı
+- Toplam dosya sayısı: 581
+- Ana Python dosyaları: core_agent_react.py, tools/code_intelligence.py
 
-* Dosya yapısı analiz edildi
-* Git durumu kontrol edildi
-* Ana Python dosyaları tespit edildi
+## Git Durumu
+- Branch: feature/auto-documentation
+- Commits: 29
+- Son commit mesajı: Core agent json parse sorunu dışında gayet iyi
 
-## Kod Kalitesi Kontrolü
+## Kod Kalitesi
+- Toplam sorun sayısı: 22
+- Hatalar: 7
+- Uyarılar: 15
 
-* core_agent_react.py dosyasının kod kalitesi analiz edildi
-* tools/code_intelligence.py dosyasının bağımlılıkları kontrol edildi
-* Kod kalitesi sorunları raporlandı
+## Bağımlılıklar
+- Toplam import sayısı: 10
+- Benzersiz modül sayısı: 5
 
 ## Güvenlik Testi
-
-* Python kodu güvenli sandbox ortamında çalıştırıldı
-
-## Rapor Özeti
-
-* Proje durumu özetlendi
-* Tüm analiz sonuçları toplandı
+- Sandbox test sonucu: Başarılı
