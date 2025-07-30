@@ -382,7 +382,7 @@ Observation: 📁 . dizinindeki dosyalar (15 adet): 📄 core_agent_react.py �
 
 💾 HAFIZA: Dosya listesi scratchpad['last_file_list']'e kaydedildi
 Thought: Mükemmel! Sistem otomatik olarak dosya listesini hafızaya kaydetti. Şimdi scratchpad'deki veriyi kullanarak Python dosyalarını sayacağım.
-Action: { "tool": "execute_local_python", "tool_input": {"code": "file_list = scratchpad['last_file_list']\npy_files = [f for f in file_list if f.endswith('.py')]\nprint(f'🐍 Python dosyası sayısı: {len(py_files)}')\nfor f in py_files[:5]:\n    print(f'  - {f}')"} }
+Action: { "tool": "execute_local_python", "tool_input": {"code": "py_files = [f for f in scratchpad['last_file_list'] if f.endswith('.py')]; print(f'Python dosyasi: {len(py_files)} adet'); print(py_files[:3])"} }
 
 ADIM 4:
 Observation: 🐍 Python dosyası sayısı: 8 - core_agent_react.py - mezuniyet_testi.py ...
@@ -395,6 +395,11 @@ Action: { "tool": "final_answer", "tool_input": {"answer": "Bu projede **8 tane*
 execute_local_python kullanırken MUTLAKA `scratchpad['key']` formatında veri oku:
 ✅ DOĞRU: `file_list = scratchpad['last_file_list']`
 ❌ YANLIŞ: `file_list = file_list` (tanımsız değişken)
+
+🔧 JSON KURALLAR: execute_local_python için:
+✅ DOĞRU: TEK SATIRLI kod + TEK TIRNAK kullan
+✅ ÖRNEK: `"code": "py_files = [f for f in scratchpad['last_file_list'] if f.endswith('.py')]; print(py_files[:3])"`
+❌ YANLIŞ: Multi-line kod veya çift tırnak (JSON parse sorunu yapar)
 
 ÖNEMLİ: Karmaşık görevlerde ÖNCE plan yap, sonra adım adım uygula. Her gözlemden sonra hangi adımda olduğunu belirt."""
 
@@ -411,84 +416,95 @@ class ReactAgent:
         # Bu, JSON için geçersiz olan \n, \t gibi karakterleri korur
         return re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1F\x7F]', '', text)
     
-    def parse_llm_response(self, response_text: str) -> tuple:
-        """LLM response'unu Thought ve Action olarak ayrıştır - Hijyen filtreli ve çok dilli"""
+    def _extract_and_sanitize_json(self, response_text: str) -> str:
+        """Akıllı JSON Çıkarıcı ve Endüstriyel Hijyen Filtresi"""
         
-        # ADIM 1: Hijyen filtresini uygula
+        # ADIM 1: JSON bloğunu bul - akıllı çıkarma
+        json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL | re.IGNORECASE)
+        
+        if json_match:
+            # JSON bloğu bulundu
+            potential_json = json_match.group(1).strip()
+        else:
+            # JSON bloğu bulunamadı, Action: kısmından sonrasını al
+            action_match = re.search(r'(?:Action|Eylem):\s*(.*)', response_text, re.DOTALL | re.IGNORECASE)
+            if action_match:
+                potential_json = action_match.group(1).strip()
+            else:
+                # Son çare: tüm metni JSON olarak kabul et
+                potential_json = response_text
+        
+        # ADIM 2: Endüstriyel hijyen filtresi - güçlü temizlik
+        clean_json = potential_json
+        
+        # 2.1: Kontrol karakterlerini temizle
+        control_chars = '\x00\x01\x02\x03\x04\x05\x06\x07\x08\x0b\x0c\x0e\x0f\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f'
+        for char in control_chars:
+            clean_json = clean_json.replace(char, '')
+        
+        # 2.2: Unicode ve emoji temizliği
+        emoji_chars = ['✅', '❌', '🔍', '📄', '📁', '💾', '🎯', '⚡', '🧠', '🔄', '🏁']
+        for emoji in emoji_chars:
+            clean_json = clean_json.replace(emoji, '')
+        
+        # 2.3: JSON string içindeki tırnak sorunlarını çöz
+        if '"code":' in clean_json and 'scratchpad[' in clean_json:
+            # 1. String içindeki \' escape dizilerini düzelt
+            if r"\.py\'" in clean_json or r"\'.py" in clean_json:
+                # Python dosya uzantısı aramalarında escape sorununu çöz
+                clean_json = clean_json.replace(r"\.py\'", ".py'")
+                clean_json = clean_json.replace(r"\'", "'")
+            
+            # 2. Double quote'ları normal hale getir
+            clean_json = re.sub(r'scratchpad\s*\[\s*"([^"]+)"\s*\]', r"scratchpad['\1']", clean_json)
+        
+        # 2.4: Satır sonu düzenleme
+        clean_json = clean_json.replace('\r\n', '\n').replace('\r', '\n')
+        
+        # 2.5: Son temizlik - fazla boşluklar
+        clean_json = '\n'.join(line.strip() for line in clean_json.split('\n') if line.strip())
+        
+        return clean_json
+    
+    def parse_llm_response(self, response_text: str) -> tuple:
+        """LLM response'unu Thought ve Action olarak ayrıştır - Yeni Akıllı Çıkarıcı"""
+        
+        # ADIM 1: Akıllı JSON çıkarıcı ve hijyen filtresini uygula
         clean_response_text = self._sanitize_json_string(response_text)
         
         # ADIM 2: Thought'u bul (Türkçe ve İngilizce destek)
         thought_match = re.search(r'(?:Thought|Düşünce):\s*(.*?)(?=Action:|Eylem:|$)', clean_response_text, re.DOTALL | re.IGNORECASE)
         thought = thought_match.group(1).strip() if thought_match else "Düşünce bulunamadı"
         
-        # ADIM 3: Action'u bul - çok dilli ve esnek (Türkçe: Eylem, İngilizce: Action)
-        action_match = re.search(r'(?:\*\*(?:Action|Eylem)\*\*|(?:Action|Eylem):)\s*```json\s*(.*?)\s*```', clean_response_text, re.DOTALL | re.IGNORECASE)
+        # ADIM 3: Action JSON'unu akıllı çıkarıcı ile temizle
+        potential_json_str = self._extract_and_sanitize_json(response_text)
         
-        if action_match:
-            json_content = action_match.group(1).strip()
+        try:
+            action_json = json.loads(potential_json_str)
             
-            # JSON temizlik - basit emoji ve kontrol karakter temizleme
-            # Bilinen problemli karakterleri kaldır
-            json_content = json_content.replace('✅', '').replace('❌', '').replace('🔍', '')
-            json_content = json_content.replace('📄', '').replace('📁', '').replace('💾', '')
+            # Final Answer araç ismini normalize et
+            if action_json.get("tool") == "Final Answer":
+                action_json["tool"] = "final_answer"
             
-            # JSON'da hem eski hem yeni format destekle
-            # Format 1: "code": "..."  
-            # Format 2: {"code": "...}  (quotes eksik)
+            return thought, action_json
             
-            if '"code":' in json_content or '{"code":' in json_content:
-                # Önce {"code": "...} formatını düzelt
-                if '{"code":' in json_content and json_content.count('"') < 6:
-                    # Format 2: {"code": "...} -> "code": "..."
-                    json_content = json_content.replace('{"code":', '"code":')
-                    # Son } den önce " ekle
-                    last_brace = json_content.rfind('}')
-                    if last_brace != -1:
-                        json_content = json_content[:last_brace] + '"' + json_content[last_brace:]
-                
-                # Şimdi standart format 1'i işle: "code": "..."
-                start_idx = json_content.find('"code":')
-                if start_idx != -1:
-                    # "code": "... bul
-                    quote_start = json_content.find('"', start_idx + 7)  # "code": den sonraki "
-                    if quote_start != -1:
-                        quote_end = json_content.rfind('"', quote_start + 1)  # Son "
-                        if quote_end != -1 and quote_end > quote_start:
-                            code_content = json_content[quote_start + 1:quote_end]
-                            # Escape karakterleri - sıra önemli!
-                            code_content = code_content.replace('\\', '\\\\')  # \ karakteri önce
-                            code_content = code_content.replace('"', '\\"')   # " karakteri
-                            code_content = code_content.replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t')
-                            # Yerine koy
-                            json_content = json_content[:quote_start + 1] + code_content + json_content[quote_end:]
+        except json.JSONDecodeError as e:
+            print(f"⚠️ JSON parse hatası: {e}")
+            print(f"🔍 Ham response (ilk 200 karakter): {repr(response_text[:200])}")
+            print(f"🔍 Çıkarılan JSON: {repr(potential_json_str)}")
             
-            # Son temizlik
-            json_content = json_content.replace('\r\n', '\n').replace('\r', '\n')
+            # Debug için dosyaya yaz
+            with open('/tmp/debug_json.txt', 'w', encoding='utf-8') as f:
+                f.write(f"HAM RESPONSE:\n{response_text}\n\nÇIKARILAN JSON:\n{potential_json_str}")
             
+            # Fallback: Son çare basit dize değiştirme
             try:
-                action_json = json.loads(json_content)
-                
-                # Final Answer araç ismini normalize et
-                if action_json.get("tool") == "Final Answer":
-                    action_json["tool"] = "final_answer"
-                
+                fallback_json = potential_json_str.encode('utf-8', 'ignore').decode('utf-8')
+                action_json = json.loads(fallback_json)
                 return thought, action_json
-            except json.JSONDecodeError as e:
-                print(f"⚠️ JSON parse hatası: {e}")
-                print(f"🔍 Ham JSON içeriği (tam): {repr(action_match.group(1))}")
-                print(f"🔍 Temizlenmiş JSON içeriği (tam): {repr(json_content)}")
-                
-                # Tam JSON'u göstermek için dosyaya yaz
-                with open('/tmp/debug_json.txt', 'w', encoding='utf-8') as f:
-                    f.write(f"HAM:\n{action_match.group(1)}\n\nTEMİZLENMİŞ:\n{json_content}")
-                # Basit dize değiştirme deneme
-                try:
-                    simple_json = json_content.replace('\✅', '').replace('\❌', '').encode('utf-8', 'ignore').decode('utf-8')
-                    action_json = json.loads(simple_json)
-                    return thought, action_json
-                except:
-                    # Fallback: metin analizi
-                    return self._fallback_parse(response_text, thought)
+            except:
+                # Fallback: metin analizi
+                return self._fallback_parse(response_text, thought)
         
         # Fallback parsing - eski format için
         return self._fallback_parse(response_text, thought)
@@ -560,35 +576,85 @@ class ReactAgent:
         raise Exception("Beklenmeyen durum: Retry döngüsü tamamlandı ama sonuç yok")
 
     def _execute_local_python_with_scratchpad(self, code: str, scratchpad: dict) -> str:
-        """execute_local_python aracını scratchpad ile çalıştır"""
+        """GÜÇLU execute_local_python - subprocess ile karmaşık kodları da çalıştırır"""
         try:
-            import io
-            from contextlib import redirect_stdout
+            import subprocess
+            import tempfile
+            import os
+            import json
             
-            # Çıktıyı yakala
-            captured_output = io.StringIO()
+            # Geçici dosyalar oluştur
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+                # Scratchpad'i JSON olarak serialize et
+                scratchpad_json = json.dumps(scratchpad, ensure_ascii=False, indent=2)
+                
+                # Python script oluştur
+                full_script = f'''
+import json
+import os
+
+# Scratchpad'i yükle
+scratchpad = {scratchpad_json}
+
+# Kullanıcı kodu
+{code}
+'''
+                f.write(full_script)
+                script_path = f.name
             
-            # Güvenlik: Sadece güvenli built-in'lere izin ver
-            safe_builtins = {
-                'print': print, 'len': len, 'str': str, 'int': int, 'float': float,
-                'list': list, 'dict': dict, 'tuple': tuple, 'set': set,
-                'sorted': sorted, 'enumerate': enumerate, 'range': range,
-                'zip': zip, 'sum': sum, 'max': max, 'min': min,
-                'any': any, 'all': all, 'filter': filter, 'map': map,
-            }
-            
-            # Namespace oluştur (scratchpad dahil)
-            namespace = {"__builtins__": safe_builtins, "scratchpad": scratchpad}
-            
-            with redirect_stdout(captured_output):
-                exec(code, namespace)
-            
-            output = captured_output.getvalue()
-            
-            return f"✅ **Python Kodu Çalıştırıldı**\n\n📤 **ÇIKTI:**\n```\n{output.strip()}\n```"
-            
+            try:
+                # Python betiğini çalıştır
+                result = subprocess.run(
+                    ['python', script_path],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,  # 10 saniye timeout
+                    cwd=os.getcwd()
+                )
+                
+                # Sonuçları kontrol et
+                if result.returncode == 0:
+                    output = result.stdout.strip()
+                    return f"✅ **Python Kodu Çalıştırıldı (subprocess)**\n\n📤 **ÇIKTI:**\n```\n{output}\n```"
+                else:
+                    error = result.stderr.strip()
+                    return f"❌ **Python Çalıştırma Hatası (subprocess)**\n\n```\n{error}\n```"
+                    
+            finally:
+                # Geçici dosyayı temizle
+                try:
+                    os.unlink(script_path)
+                except:
+                    pass
+                    
+        except subprocess.TimeoutExpired:
+            return f"❌ **Python Kodu Timeout (10s)**\n\nKod çok uzun sürdü."
         except Exception as e:
-            return f"❌ **Python Çalıştırma Hatası**\n\n{str(e)}"
+            # Fallback: Eski exec() yöntemini dene
+            try:
+                import io
+                from contextlib import redirect_stdout
+                
+                captured_output = io.StringIO()
+                safe_builtins = {
+                    'print': print, 'len': len, 'str': str, 'int': int, 'float': float,
+                    'list': list, 'dict': dict, 'tuple': tuple, 'set': set,
+                    'sorted': sorted, 'enumerate': enumerate, 'range': range,
+                    'zip': zip, 'sum': sum, 'max': max, 'min': min,
+                    'any': any, 'all': all, 'filter': filter, 'map': map,
+                    'open': open,  # Dosya yazma için
+                }
+                
+                namespace = {"__builtins__": safe_builtins, "scratchpad": scratchpad}
+                
+                with redirect_stdout(captured_output):
+                    exec(code, namespace)
+                
+                output = captured_output.getvalue()
+                return f"✅ **Python Kodu Çalıştırıldı (fallback)**\n\n📤 **ÇIKTI:**\n```\n{output.strip()}\n```"
+                
+            except Exception as exec_error:
+                return f"❌ **Python Çalıştırma Hatası**\n\nSubprocess: {str(e)}\nExec: {str(exec_error)}"
 
     def execute_tool(self, action: dict) -> str:
         """Aracı çalıştır ve sonucu döndür - Yeni format için optimize edildi"""
